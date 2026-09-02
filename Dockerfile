@@ -1,8 +1,8 @@
 FROM php:8.4-fpm-alpine
 
 # Dépendances système + extensions PHP
-RUN apk add --no-cache nginx libpng-dev libzip-dev zip unzip git curl postgresql-dev oniguruma-dev \
-    && docker-php-ext-install pdo pdo_mysql pdo_pgsql mbstring zip gd bcmath
+RUN apk add --no-cache nginx libpng-dev libzip-dev zip unzip git curl postgresql-dev oniguruma-dev icu-dev \
+    && docker-php-ext-install pdo pdo_mysql pdo_pgsql mbstring zip gd bcmath intl
 
 # Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
