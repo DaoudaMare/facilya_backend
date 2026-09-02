@@ -140,6 +140,68 @@ class RelayApiTest extends TestCase
         $this->getJson('/api/relay/jobs/next?wait=0')->assertNoContent();
     }
 
+    public function test_deposit_of_service_amount_does_not_match_total_with_fees(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+        $orange->update([
+            'receive_phone' => '70004444',
+            'payment_ussd' => '*144*2*1*{numero}*{montant}#',
+        ]);
+
+        $user = User::factory()->create([
+            'phone' => '0710000100',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0710000100',
+            'recipient_phone' => '0760000100',
+        ])->assertCreated();
+
+        $this->assertSame(102.0, (float) $created->json('data.total_amount'));
+        $this->assertSame('*144*2*1*70004444*102#', $created->json('data.payment_ussd'));
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+        $this->assertSame('102.00', $transaction->totalAmount());
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/deposits', [
+            'network' => 'orange',
+            'amount' => 100,
+            'provider_transaction_id' => 'PP-SHORT-100',
+            'sender_phone' => '0710000100',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.matched', false);
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'pending',
+        ]);
+
+        $this->postJson('/api/relay/deposits', [
+            'network' => 'orange',
+            'amount' => 102,
+            'provider_transaction_id' => 'PP-FULL-102',
+            'sender_phone' => '0710000100',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.matched', true);
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'received',
+        ]);
+    }
+
     public function test_manual_confirm_marks_payment_and_creates_job(): void
     {
         $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();

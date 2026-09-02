@@ -63,7 +63,8 @@ class FeeQuoteService
             return number_format((float) $fee->value, 2, '.', '');
         }
 
-        $computed = bcmul($amount, bcdiv((string) $fee->value, '100', 8), 2);
+        $computed = bcmul($amount, bcdiv((string) $fee->value, '100', 8), 4);
+        $computed = number_format((float) round((float) $computed), 2, '.', '');
 
         if ($fee->min_fee !== null && bccomp($computed, (string) $fee->min_fee, 2) === -1) {
             $computed = number_format((float) $fee->min_fee, 2, '.', '');

@@ -72,6 +72,12 @@ class ApiAuthAndCatalogTest extends TestCase
         $this->getJson('/api/v1/quotes/transfers?amount=5000&source_network_id='.$source->id.'&destination_network_id='.$destination->id)
             ->assertOk()
             ->assertJsonPath('data.amount', '5000.00');
+
+        $this->getJson('/api/v1/quotes/transfers?amount=100&source_network_id='.$source->id.'&destination_network_id='.$destination->id)
+            ->assertOk()
+            ->assertJsonPath('data.amount', '100.00')
+            ->assertJsonPath('data.total_fee', '2.00')
+            ->assertJsonPath('data.total_amount', '102.00');
     }
 
     public function test_email_otp_creates_account(): void

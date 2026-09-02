@@ -98,6 +98,18 @@ class FeeQuoteServiceTest extends TestCase
         $this->assertSame('400.00', $service->compute($fee, '50000'));
     }
 
+    #[Test]
+    public function percentage_rounds_half_up_to_whole_xof(): void
+    {
+        $fee = $this->makeFee(FeeModeEnum::PERCENTAGE, '1.5');
+        $service = new FeeQuoteService(
+            Mockery::mock(FeeRepositoryInterface::class),
+            Mockery::mock(TravelCompanyRouteRepositoryInterface::class),
+        );
+
+        $this->assertSame('2.00', $service->compute($fee, '100'));
+    }
+
     protected function makeFee(
         FeeModeEnum $mode,
         string $value,
