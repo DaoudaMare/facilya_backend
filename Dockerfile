@@ -1,7 +1,7 @@
 FROM php:8.4-fpm-alpine
 
-# Dépendances système + extensions PHP
-RUN apk add --no-cache nginx libpng-dev libzip-dev zip unzip git curl postgresql-dev oniguruma-dev icu-dev \
+# Dépendances système + extensions PHP + Node.js pour Vite
+RUN apk add --no-cache nginx libpng-dev libzip-dev zip unzip git curl postgresql-dev oniguruma-dev icu-dev nodejs npm \
     && docker-php-ext-install pdo pdo_mysql pdo_pgsql mbstring zip gd bcmath intl
 
 # Composer
@@ -11,6 +11,9 @@ WORKDIR /var/www/html
 COPY . .
 
 RUN composer install --no-dev --optimize-autoloader --no-interaction
+
+# Build des assets front-end (CSS/JS Filament + Vite)
+RUN npm install && npm run build
 
 RUN mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache \
