@@ -55,7 +55,7 @@ class TransactionController extends Controller
     public function quoteTransfer(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'amount' => ['required', 'numeric', 'min:500'],
+            'amount' => ['required', 'numeric', 'min:100'],
             'source_network_id' => ['required', 'integer', 'exists:transfer_networks,id'],
             'destination_network_id' => ['required', 'integer', 'exists:transfer_networks,id', 'different:source_network_id'],
         ]);
@@ -90,7 +90,7 @@ class TransactionController extends Controller
     {
         $data = $request->validate([
             'pin' => ['required', 'string', 'regex:/^\d{4}$/'],
-            'amount' => ['required', 'numeric', 'min:500'],
+            'amount' => ['required', 'numeric', 'min:100'],
             'source_network_id' => ['required', 'integer', 'exists:transfer_networks,id'],
             'destination_network_id' => ['required', 'integer', 'exists:transfer_networks,id', 'different:source_network_id'],
             'sender_phone' => ['required', 'string', 'max:32'],
