@@ -17,8 +17,8 @@ class AuthController extends Controller
     public function requestOtp(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'channel' => ['required', 'in:sms,email'],
-            'phone' => ['required_if:channel,sms', 'nullable', 'string', 'max:32'],
+            'channel' => ['required', 'in:sms,email,whatsapp'],
+            'phone' => ['required_if:channel,sms,whatsapp', 'nullable', 'string', 'max:32'],
             'email' => ['required_if:channel,email', 'nullable', 'email', 'max:120'],
         ]);
 
@@ -34,8 +34,8 @@ class AuthController extends Controller
     public function verifyOtp(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'channel' => ['required', 'in:sms,email'],
-            'phone' => ['required_if:channel,sms', 'nullable', 'string', 'max:32'],
+            'channel' => ['required', 'in:sms,email,whatsapp'],
+            'phone' => ['required_if:channel,sms,whatsapp', 'nullable', 'string', 'max:32'],
             'email' => ['required_if:channel,email', 'nullable', 'email', 'max:120'],
             'code' => ['required', 'string', 'size:6'],
         ]);

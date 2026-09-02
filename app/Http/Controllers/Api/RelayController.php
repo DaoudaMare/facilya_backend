@@ -79,6 +79,25 @@ class RelayController extends Controller
         ]);
     }
 
+    public function confirmPayment(Request $request, string $uuid): JsonResponse
+    {
+        $device = $this->device($request);
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $transaction = $this->relay->confirmPayment(
+            $device,
+            $uuid,
+            $data['note'] ?? null,
+        );
+
+        return response()->json([
+            'data' => $this->relay->transactionPayload($transaction),
+        ]);
+    }
+
     public function nextJob(Request $request): JsonResponse|Response
     {
         $device = $this->device($request);

@@ -32,5 +32,7 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="ZAPWISE_API_KEY" value="testing" force="true"/>
+        <env name="ZAPWISE_SEND_OTP_NUMBER" value="22662765701" force="true"/>
     </php>
 </phpunit>

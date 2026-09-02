@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Channels\SmsChannel;
+use App\Channels\WhatsAppChannel;
 use App\Models\User;
 use App\Notifications\OtpCodeNotification;
 use App\Repositories\Contracts\UserRepositoryInterface;
@@ -142,14 +143,24 @@ class AuthService
                 return;
             }
 
+            if ($channel === 'whatsapp') {
+                Notification::route(WhatsAppChannel::class, $destination)->notifyNow($notification);
+
+                return;
+            }
+
             Notification::route(SmsChannel::class, $destination)->notifyNow($notification);
+        } catch (ValidationException $exception) {
+            throw $exception;
         } catch (\Throwable $exception) {
             report($exception);
 
             throw ValidationException::withMessages([
-                $channel === 'email' ? 'email' : 'phone' => $channel === 'email'
-                    ? 'Impossible d’envoyer l’e-mail pour le moment. Réessayez.'
-                    : 'Impossible d’envoyer le SMS pour le moment. Réessayez.',
+                $channel === 'email' ? 'email' : 'phone' => match ($channel) {
+                    'email' => 'Impossible d’envoyer l’e-mail pour le moment. Réessayez.',
+                    'whatsapp' => 'Impossible d’envoyer le code WhatsApp pour le moment. Réessayez.',
+                    default => 'Impossible d’envoyer le SMS pour le moment. Réessayez.',
+                },
             ]);
         }
     }
@@ -217,9 +228,9 @@ class AuthService
     {
         $channel = strtolower(trim($channel));
 
-        if (! in_array($channel, ['sms', 'email'], true)) {
+        if (! in_array($channel, ['sms', 'email', 'whatsapp'], true)) {
             throw ValidationException::withMessages([
-                'channel' => 'Choisissez l’envoi par SMS ou par e-mail.',
+                'channel' => 'Choisissez l’envoi par WhatsApp, SMS ou e-mail.',
             ]);
         }
 

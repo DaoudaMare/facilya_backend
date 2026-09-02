@@ -56,4 +56,28 @@ class Phone
             && strlen($b) >= 8
             && substr($a, -8) === substr($b, -8);
     }
+
+    /**
+     * Chatid Zapwize = numéro du destinataire, chiffres uniquement.
+     * On préfixe 226 s’il manque, sans retirer le 0 local.
+     * Ex. 07684843 → 22607684843 (comme le curl qui fonctionne).
+     */
+    public static function toWhatsAppChatId(string $value): string
+    {
+        $digits = preg_replace('/\D+/', '', $value) ?? '';
+
+        if (str_starts_with($digits, '00226')) {
+            $digits = substr($digits, 2);
+        }
+
+        if ($digits === '') {
+            return '';
+        }
+
+        if (! str_starts_with($digits, '226')) {
+            $digits = '226'.$digits;
+        }
+
+        return $digits;
+    }
 }

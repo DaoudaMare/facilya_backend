@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Data\PaymentStatusEnum;
+use App\Data\ServiceStatusEnum;
 use App\Models\RelayDeposit;
 use App\Models\RelayDevice;
 use App\Models\RelayJob;
@@ -81,11 +82,68 @@ class RelayService
             return null;
         }
 
-        $this->transactions->markPaymentReceived($transaction, $deposit->provider_transaction_id);
+        $this->applyReceivedPayment($transaction, $deposit);
+
+        return $transaction->fresh() ?? $transaction;
+    }
+
+    public function confirmPayment(RelayDevice $device, string $uuid, ?string $note = null): Transaction
+    {
+        $transaction = Transaction::query()
+            ->with(['sourceNetwork', 'destinationNetwork', 'paymentNetwork', 'trip', 'deposits'])
+            ->where('uuid', $uuid)
+            ->first();
+
+        if (! $transaction) {
+            throw ValidationException::withMessages([
+                'uuid' => 'Transaction introuvable.',
+            ]);
+        }
+
+        if ($transaction->isPaid()) {
+            return $transaction;
+        }
+
+        $status = $transaction->payment_status instanceof PaymentStatusEnum
+            ? $transaction->payment_status
+            : PaymentStatusEnum::tryFrom((string) $transaction->payment_status);
+
+        if (! in_array($status, [PaymentStatusEnum::PENDING, PaymentStatusEnum::PROCESSING], true)) {
+            throw ValidationException::withMessages([
+                'uuid' => 'Ce paiement ne peut plus être confirmé.',
+            ]);
+        }
+
+        $reference = 'MANUAL-'.$transaction->reference;
+        $deposit = RelayDeposit::query()->where('provider_transaction_id', $reference)->first();
+
+        if (! $deposit) {
+            $deposit = RelayDeposit::query()->create([
+                'relay_device_id' => $device->id,
+                'transaction_id' => $transaction->id,
+                'network' => $transaction->payingNetwork()?->relayCode() ?? '',
+                'amount' => $transaction->totalAmount(),
+                'provider_transaction_id' => $reference,
+                'sender_phone' => $transaction->payerPhone() ?? '',
+                'sender_name' => 'Confirmation manuelle',
+                'received_at' => now(),
+                'raw_body' => $note ?: 'Paiement confirmé manuellement depuis TelRelayX.',
+                'matched_at' => now(),
+            ]);
+        }
+
+        return $this->applyReceivedPayment($transaction, $deposit);
+    }
+
+    protected function applyReceivedPayment(Transaction $transaction, RelayDeposit $deposit): Transaction
+    {
+        if (! $transaction->isPaid()) {
+            $this->transactions->markPaymentReceived($transaction, $deposit->provider_transaction_id);
+        }
 
         $deposit->fill([
             'transaction_id' => $transaction->id,
-            'matched_at' => now(),
+            'matched_at' => $deposit->matched_at ?? now(),
         ])->save();
 
         $transaction = $transaction->fresh([
@@ -96,13 +154,28 @@ class RelayService
         ]) ?? $transaction;
 
         if ($transaction->isTicketPurchase()) {
-            $this->transactions->fulfillAfterPayment($transaction);
+            if (! $transaction->isServed()) {
+                $this->transactions->fulfillAfterPayment($transaction);
+            }
         } else {
-            $this->transactions->markServiceProcessing($transaction);
+            $service = $transaction->service_status;
+            $serviceValue = $service instanceof ServiceStatusEnum
+                ? $service
+                : ServiceStatusEnum::tryFrom((string) $service);
+
+            if ($serviceValue === ServiceStatusEnum::PENDING) {
+                $this->transactions->markServiceProcessing($transaction);
+            }
+
             $this->createFulfillmentJob($transaction);
         }
 
-        return $transaction->fresh() ?? $transaction;
+        return $transaction->fresh([
+            'sourceNetwork',
+            'destinationNetwork',
+            'paymentNetwork',
+            'deposits',
+        ]) ?? $transaction;
     }
 
     /**

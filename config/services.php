@@ -41,4 +41,10 @@ return [
         'token' => env('SMS_HTTP_TOKEN'),
     ],
 
+    'zapwize' => [
+        'key' => env('ZAPWISE_API_KEY'),
+        'from' => env('ZAPWISE_SEND_OTP_NUMBER'),
+        'url' => env('ZAPWISE_WHATSAPP_URL', 'https://api.zapwize.com/v1/whatsapp/message'),
+    ],
+
 ];

@@ -9,6 +9,7 @@ use App\Notifications\OtpCodeNotification;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -175,5 +176,42 @@ class ApiAuthAndCatalogTest extends TestCase
             'phone' => '0700000001',
             'code' => '000000',
         ])->assertUnprocessable();
+    }
+
+    public function test_whatsapp_otp_is_sent_via_zapwize(): void
+    {
+        Http::fake([
+            'api.zapwize.com/*' => Http::response(['success' => true, 'value' => ['queued' => true]], 200),
+        ]);
+
+        $this->postJson('/api/v1/auth/otp/request', [
+            'channel' => 'whatsapp',
+            'phone' => '70111111',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.channel', 'whatsapp')
+            ->assertJsonMissingPath('data.debug_otp');
+
+        $otp = Cache::get('auth.otp.whatsapp.70111111');
+        $this->assertNotEmpty($otp);
+
+        Http::assertSent(function ($request) use ($otp) {
+            $payload = json_decode($request->body(), true);
+
+            return $request->method() === 'POST'
+                && $request->url() === 'https://api.zapwize.com/v1/whatsapp/message'
+                && $request->hasHeader('Authorization', 'Bearer testing')
+                && str_starts_with((string) $request->header('Content-Type')[0], 'application/json')
+                && ($payload['chatid'] ?? null) === '22670111111'
+                && str_contains((string) data_get($payload, 'content.text'), (string) $otp);
+        });
+
+        $this->postJson('/api/v1/auth/otp/verify', [
+            'channel' => 'whatsapp',
+            'phone' => '70 11 11 11',
+            'code' => $otp,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.user.phone', '70111111');
     }
 }

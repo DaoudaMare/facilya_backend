@@ -140,6 +140,50 @@ class RelayApiTest extends TestCase
         $this->getJson('/api/relay/jobs/next?wait=0')->assertNoContent();
     }
 
+    public function test_manual_confirm_marks_payment_and_creates_job(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+        $orange->update(['receive_phone' => '70003333']);
+
+        $user = User::factory()->create([
+            'phone' => '0755555555',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 5000,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0766666666',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/transactions/'.$transaction->uuid.'/confirm', [
+            'note' => 'Vu sur le compte Orange',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.uuid', $transaction->uuid)
+            ->assertJsonPath('data.payment_status', 'paid');
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'received',
+            'service_status' => 'processing',
+        ]);
+
+        $this->getJson('/api/relay/jobs/next?wait=0')
+            ->assertOk()
+            ->assertJsonPath('data.recipient_phone', '0766666666');
+    }
+
     public function test_user_token_cannot_access_relay(): void
     {
         $user = User::factory()->create(['pin' => '1234']);
