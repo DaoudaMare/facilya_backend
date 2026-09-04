@@ -40,7 +40,7 @@ class RelayController extends Controller
             'network' => ['required', 'string', 'max:32'],
             'amount' => ['required', 'numeric', 'min:1'],
             'provider_transaction_id' => ['required', 'string', 'max:120'],
-            'sender_phone' => ['required', 'string', 'max:32'],
+            'sender_phone' => ['nullable', 'string', 'max:32'],
             'sender_name' => ['nullable', 'string', 'max:120'],
             'received_at' => ['nullable', 'date'],
             'raw_body' => ['nullable', 'string'],
@@ -95,6 +95,55 @@ class RelayController extends Controller
 
         return response()->json([
             'data' => $this->relay->transactionPayload($transaction),
+        ]);
+    }
+
+    public function cancelPayment(Request $request, string $uuid): JsonResponse
+    {
+        $device = $this->device($request);
+
+        $data = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $transaction = $this->relay->cancelPayment(
+            $device,
+            $uuid,
+            $data['note'] ?? null,
+        );
+
+        return response()->json([
+            'data' => $this->relay->transactionPayload($transaction),
+        ]);
+    }
+
+    public function retryPayment(Request $request, string $uuid): JsonResponse
+    {
+        $device = $this->device($request);
+
+        $data = $request->validate([
+            'deposits' => ['sometimes', 'array'],
+            'deposits.*.network' => ['required', 'string', 'max:32'],
+            'deposits.*.amount' => ['required', 'numeric', 'min:1'],
+            'deposits.*.provider_transaction_id' => ['required', 'string', 'max:120'],
+            'deposits.*.sender_phone' => ['nullable', 'string', 'max:32'],
+            'deposits.*.sender_name' => ['nullable', 'string', 'max:120'],
+            'deposits.*.received_at' => ['nullable', 'date'],
+            'deposits.*.raw_body' => ['nullable', 'string'],
+        ]);
+
+        $result = $this->relay->retryPayment(
+            $device,
+            $uuid,
+            $data['deposits'] ?? [],
+        );
+
+        return response()->json([
+            'data' => [
+                ...$this->relay->transactionPayload($result['transaction']),
+                'retry_matched' => $result['matched'],
+                'deposits_stored' => $result['deposits_stored'],
+            ],
         ]);
     }
 

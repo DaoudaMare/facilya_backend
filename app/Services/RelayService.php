@@ -35,6 +35,8 @@ class RelayService
             'fulfill_networks' => $networks !== [] ? $networks : $device->fulfill_networks,
         ])->save();
 
+        $this->rematchUnmatchedDeposits();
+
         return $device->fresh() ?? $device;
     }
 
@@ -44,11 +46,29 @@ class RelayService
      */
     public function ingestDeposit(RelayDevice $device, array $payload): array
     {
+        return $this->storeDeposit($device, $payload, autoMatch: true);
+    }
+
+    /**
+     * Enregistre un SMS de dépôt. Ne le lie à une transaction que si
+     * $autoMatch est vrai (arrivée live). Un SMS déjà lié n'est jamais réutilisé.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{deposit: RelayDeposit, created: bool}
+     */
+    public function storeDeposit(RelayDevice $device, array $payload, bool $autoMatch = true): array
+    {
         $existing = RelayDeposit::query()
             ->where('provider_transaction_id', $payload['provider_transaction_id'])
             ->first();
 
         if ($existing) {
+            if ($autoMatch && ! $existing->transaction_id) {
+                $this->matchDeposit($existing);
+            }
+
+            $existing = $existing->fresh(['transaction']) ?? $existing;
+
             return ['deposit' => $existing, 'created' => false];
         }
 
@@ -57,7 +77,7 @@ class RelayService
             'network' => strtolower((string) $payload['network']),
             'amount' => $payload['amount'],
             'provider_transaction_id' => $payload['provider_transaction_id'],
-            'sender_phone' => Phone::normalize((string) $payload['sender_phone']),
+            'sender_phone' => Phone::normalize((string) ($payload['sender_phone'] ?? '')),
             'sender_name' => $payload['sender_name'] ?? null,
             'received_at' => isset($payload['received_at'])
                 ? Carbon::parse($payload['received_at'])
@@ -65,9 +85,11 @@ class RelayService
             'raw_body' => $payload['raw_body'] ?? null,
         ]);
 
-        $this->matchDeposit($deposit);
+        if ($autoMatch) {
+            $this->matchDeposit($deposit);
+        }
 
-        return ['deposit' => $deposit->fresh() ?? $deposit, 'created' => true];
+        return ['deposit' => $deposit->fresh(['transaction']) ?? $deposit, 'created' => true];
     }
 
     public function matchDeposit(RelayDeposit $deposit): ?Transaction
@@ -133,6 +155,127 @@ class RelayService
         }
 
         return $this->applyReceivedPayment($transaction, $deposit);
+    }
+
+    public function cancelPayment(RelayDevice $device, string $uuid, ?string $note = null): Transaction
+    {
+        $transaction = Transaction::query()
+            ->with(['sourceNetwork', 'destinationNetwork', 'paymentNetwork', 'trip', 'deposits'])
+            ->where('uuid', $uuid)
+            ->first();
+
+        if (! $transaction) {
+            throw ValidationException::withMessages([
+                'uuid' => 'Transaction introuvable.',
+            ]);
+        }
+
+        $status = $transaction->payment_status instanceof PaymentStatusEnum
+            ? $transaction->payment_status
+            : PaymentStatusEnum::tryFrom((string) $transaction->payment_status);
+
+        if ($status === PaymentStatusEnum::CANCELLED) {
+            return $transaction;
+        }
+
+        if ($transaction->isPaid()) {
+            throw ValidationException::withMessages([
+                'uuid' => 'Un paiement reçu ne peut plus être annulé.',
+            ]);
+        }
+
+        if (! in_array($status, [PaymentStatusEnum::PENDING, PaymentStatusEnum::PROCESSING], true)) {
+            throw ValidationException::withMessages([
+                'uuid' => 'Cette transaction ne peut plus être annulée.',
+            ]);
+        }
+
+        $reason = $note ?: 'Annulée depuis TelRelayX ('.$device->name.').';
+        $transaction = $this->transactions->markCancelled($transaction, $reason);
+
+        RelayJob::query()
+            ->where('transaction_id', $transaction->id)
+            ->whereIn('status', ['pending', 'claimed'])
+            ->update([
+                'status' => 'failed',
+                'failure_reason' => 'transaction_cancelled',
+                'message' => $reason,
+                'completed_at' => now(),
+            ]);
+
+        return $transaction->fresh([
+            'sourceNetwork',
+            'destinationNetwork',
+            'paymentNetwork',
+            'trip',
+            'deposits',
+        ]) ?? $transaction;
+    }
+
+    /**
+     * Relance le matching d'une transaction en attente : enregistre les SMS
+     * envoyés par le relais, puis lie le premier dépôt inutilisé qui
+     * correspond (après création, même numéro, même montant / réseau).
+     *
+     * @param  list<array<string, mixed>>  $deposits
+     * @return array{transaction: Transaction, matched: bool, deposits_stored: int}
+     */
+    public function retryPayment(RelayDevice $device, string $uuid, array $deposits = []): array
+    {
+        $transaction = Transaction::query()
+            ->with(['sourceNetwork', 'destinationNetwork', 'paymentNetwork', 'trip', 'deposits'])
+            ->where('uuid', $uuid)
+            ->first();
+
+        if (! $transaction) {
+            throw ValidationException::withMessages([
+                'uuid' => 'Transaction introuvable.',
+            ]);
+        }
+
+        $stored = 0;
+        foreach ($deposits as $payload) {
+            $result = $this->storeDeposit($device, $payload, autoMatch: false);
+            if ($result['created']) {
+                $stored++;
+            }
+        }
+
+        if ($transaction->isPaid()) {
+            return [
+                'transaction' => $transaction->fresh(['deposits']) ?? $transaction,
+                'matched' => true,
+                'deposits_stored' => $stored,
+            ];
+        }
+
+        $status = $transaction->payment_status instanceof PaymentStatusEnum
+            ? $transaction->payment_status
+            : PaymentStatusEnum::tryFrom((string) $transaction->payment_status);
+
+        if (! in_array($status, [PaymentStatusEnum::PENDING, PaymentStatusEnum::PROCESSING], true)) {
+            throw ValidationException::withMessages([
+                'uuid' => 'Cette transaction ne peut plus être relancée.',
+            ]);
+        }
+
+        $deposit = $this->findMatchingDepositFor($transaction);
+
+        if (! $deposit) {
+            return [
+                'transaction' => $transaction->fresh(['deposits']) ?? $transaction,
+                'matched' => false,
+                'deposits_stored' => $stored,
+            ];
+        }
+
+        $transaction = $this->applyReceivedPayment($transaction, $deposit);
+
+        return [
+            'transaction' => $transaction,
+            'matched' => true,
+            'deposits_stored' => $stored,
+        ];
     }
 
     protected function applyReceivedPayment(Transaction $transaction, RelayDeposit $deposit): Transaction
@@ -361,6 +504,7 @@ class RelayService
             'total_amount' => number_format((float) $transaction->totalAmount(), 0, '.', ''),
             'currency' => $transaction->currency,
             'payment_status' => $this->relayPaymentStatus($transaction),
+            'created_at' => $transaction->created_at?->toIso8601String(),
             'payment_expires_at' => $transaction->payment_expires_at?->toIso8601String(),
             'deposit' => $deposit ? [
                 'sender_phone' => $deposit->sender_phone,
@@ -374,6 +518,17 @@ class RelayService
         ];
     }
 
+    protected function rematchUnmatchedDeposits(): void
+    {
+        RelayDeposit::query()
+            ->whereNull('transaction_id')
+            ->where('created_at', '>=', now()->subDay())
+            ->latest()
+            ->limit(25)
+            ->get()
+            ->each(fn (RelayDeposit $deposit) => $this->matchDeposit($deposit));
+    }
+
     protected function findMatchingTransaction(RelayDeposit $deposit): ?Transaction
     {
         $candidates = Transaction::query()
@@ -382,29 +537,83 @@ class RelayService
                 PaymentStatusEnum::PENDING,
                 PaymentStatusEnum::PROCESSING,
             ])
-            ->where(function ($query): void {
-                $query
-                    ->whereNull('payment_expires_at')
-                    ->orWhere('payment_expires_at', '>=', now()->subMinutes(5));
-            })
+            ->where('created_at', '>=', now()->subDay())
             ->orderBy('created_at')
             ->get();
 
-        $expectedAmount = (int) round((float) $deposit->amount);
+        $byAmountAndNetwork = $candidates->filter(
+            fn (Transaction $transaction): bool => $this->depositFitsTransaction($deposit, $transaction),
+        );
 
-        return $candidates->first(function (Transaction $transaction) use ($deposit, $expectedAmount): bool {
-            if ((int) round((float) $transaction->totalAmount()) !== $expectedAmount) {
-                return false;
-            }
-
-            $network = $transaction->payingNetwork();
-
-            if (! $network || $network->relayCode() !== strtolower($deposit->network)) {
-                return false;
-            }
-
+        $withPhone = $byAmountAndNetwork->first(function (Transaction $transaction) use ($deposit): bool {
             return Phone::matches((string) $transaction->payerPhone(), (string) $deposit->sender_phone);
         });
+
+        if ($withPhone) {
+            return $withPhone;
+        }
+
+        // Le SMS porte le numéro Mobile Money qui a payé, pas forcément
+        // le compte Facilya. S'il n'y a qu'un paiement en attente pour
+        // ce montant et ce réseau, on l'associe.
+        if ($byAmountAndNetwork->count() === 1) {
+            return $byAmountAndNetwork->first();
+        }
+
+        return null;
+    }
+
+    protected function findMatchingDepositFor(Transaction $transaction): ?RelayDeposit
+    {
+        $notBefore = $transaction->created_at?->copy()->subMinute() ?? now()->subDay();
+
+        return RelayDeposit::query()
+            ->whereNull('transaction_id')
+            ->where(function ($query) use ($notBefore): void {
+                $query
+                    ->where('received_at', '>=', $notBefore)
+                    ->orWhere(function ($inner) use ($notBefore): void {
+                        $inner->whereNull('received_at')->where('created_at', '>=', $notBefore);
+                    });
+            })
+            ->orderBy('received_at')
+            ->orderBy('id')
+            ->get()
+            ->first(fn (RelayDeposit $deposit): bool => $this->depositFitsTransaction(
+                $deposit,
+                $transaction,
+                requirePhone: true,
+            ));
+    }
+
+    protected function depositFitsTransaction(
+        RelayDeposit $deposit,
+        Transaction $transaction,
+        bool $requirePhone = false,
+    ): bool {
+        if ((int) round((float) $deposit->amount) !== (int) round((float) $transaction->totalAmount())) {
+            return false;
+        }
+
+        $network = $transaction->payingNetwork();
+        if (! $network || $network->relayCode() !== strtolower((string) $deposit->network)) {
+            return false;
+        }
+
+        $when = $deposit->received_at ?? $deposit->created_at;
+        $created = $transaction->created_at;
+        if ($when && $created && $when->lt($created->copy()->subMinute())) {
+            return false;
+        }
+
+        if ($requirePhone) {
+            return Phone::matches(
+                (string) $transaction->payerPhone(),
+                (string) $deposit->sender_phone,
+            );
+        }
+
+        return true;
     }
 
     protected function createFulfillmentJob(Transaction $transaction): RelayJob

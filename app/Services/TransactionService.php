@@ -211,6 +211,19 @@ class TransactionService
         return $transaction;
     }
 
+    public function markCancelled(Transaction $transaction, string $reason): Transaction
+    {
+        $transaction->fill([
+            'payment_status' => PaymentStatusEnum::CANCELLED,
+            'service_status' => ServiceStatusEnum::CANCELLED,
+            'payment_failure_reason' => $reason,
+            'service_failure_reason' => $reason,
+        ]);
+        $transaction->save();
+
+        return $transaction;
+    }
+
     public function markServiceProcessing(Transaction $transaction): Transaction
     {
         if (! $transaction->isPaid()) {

@@ -18,6 +18,11 @@ class Phone
             $digits = substr($digits, 3);
         }
 
+        // SMS Orange : 7684843 (0 local omis) → 07684843
+        if (strlen($digits) === 7) {
+            $digits = '0'.$digits;
+        }
+
         return $digits;
     }
 
@@ -52,9 +57,13 @@ class Phone
             return true;
         }
 
-        return strlen($a) >= 8
-            && strlen($b) >= 8
-            && substr($a, -8) === substr($b, -8);
+        if (strlen($a) >= 8 && strlen($b) >= 8 && substr($a, -8) === substr($b, -8)) {
+            return true;
+        }
+
+        return strlen($a) >= 7
+            && strlen($b) >= 7
+            && substr($a, -7) === substr($b, -7);
     }
 
     /**

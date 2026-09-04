@@ -16,4 +16,13 @@ class PhoneTest extends TestCase
         $this->assertSame('22670111111', Phone::toWhatsAppChatId('70111111'));
         $this->assertSame('22670111111', Phone::toWhatsAppChatId('70 11 11 11'));
     }
+
+    public function test_matches_orange_sms_number_without_local_zero(): void
+    {
+        $this->assertTrue(Phone::matches('07684843', '7684843'));
+        $this->assertTrue(Phone::matches('07684843', '2267684843'));
+        $this->assertTrue(Phone::matches('07684843', '22607684843'));
+        $this->assertTrue(Phone::matches('07684843', '07684843'));
+        $this->assertFalse(Phone::matches('07684843', '07111111'));
+    }
 }

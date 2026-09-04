@@ -202,6 +202,177 @@ class RelayApiTest extends TestCase
         ]);
     }
 
+    public function test_deposit_matches_when_sms_omits_local_zero(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+        $orange->update(['receive_phone' => '70005555']);
+
+        $user = User::factory()->create([
+            'phone' => '07684843',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '07684843',
+            'recipient_phone' => '0710000200',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/deposits', [
+            'network' => 'orange',
+            'amount' => (int) round((float) $transaction->totalAmount()),
+            'provider_transaction_id' => 'PP-NOZERO-1',
+            'sender_phone' => '7684843',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.matched', true);
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'received',
+            'service_status' => 'processing',
+        ]);
+
+        $this->getJson('/api/relay/jobs/next?wait=0')
+            ->assertOk()
+            ->assertJsonPath('data.recipient_phone', '0710000200');
+    }
+
+    public function test_late_sms_still_matches_after_payment_window(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $user = User::factory()->create([
+            'phone' => '0710000300',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0710000300',
+            'recipient_phone' => '0760000300',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+        $transaction->forceFill([
+            'payment_expires_at' => now()->subMinutes(40),
+        ])->save();
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/deposits', [
+            'network' => 'orange',
+            'amount' => (int) round((float) $transaction->totalAmount()),
+            'provider_transaction_id' => 'PP-LATE-1',
+            'sender_phone' => '0710000300',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.matched', true);
+
+        $this->assertDatabaseHas('relay_jobs', [
+            'transaction_id' => $transaction->id,
+            'status' => 'pending',
+        ]);
+    }
+
+    public function test_unique_pending_transfer_matches_even_if_sms_phone_differs(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $user = User::factory()->create([
+            'phone' => '07684843',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '07684843',
+            'recipient_phone' => '061279815',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/deposits', [
+            'network' => 'orange',
+            'amount' => (int) round((float) $transaction->totalAmount()),
+            'provider_transaction_id' => 'PP260904.0915.60763281',
+            'sender_phone' => '07018784',
+            'sender_name' => 'DAOUDA',
+            'raw_body' => 'Vous avez recu 102.0 FCFA du 07018784,DAOUDA. Trans ID: PP260904.0915.60763281.',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.matched', true);
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'received',
+        ]);
+    }
+
+    public function test_ambiguous_pending_transfers_are_not_matched_by_amount_alone(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $userA = User::factory()->create(['phone' => '07684843', 'pin' => '1234']);
+        $userB = User::factory()->create(['phone' => '07555555', 'pin' => '1234']);
+
+        Sanctum::actingAs($userA);
+        $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '07684843',
+            'recipient_phone' => '061279815',
+        ])->assertCreated();
+
+        Sanctum::actingAs($userB);
+        $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '07555555',
+            'recipient_phone' => '062222222',
+        ])->assertCreated();
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/deposits', [
+            'network' => 'orange',
+            'amount' => 102,
+            'provider_transaction_id' => 'PP-AMBIGUOUS-1',
+            'sender_phone' => '07018784',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.matched', false);
+    }
+
     public function test_manual_confirm_marks_payment_and_creates_job(): void
     {
         $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
@@ -244,6 +415,306 @@ class RelayApiTest extends TestCase
         $this->getJson('/api/relay/jobs/next?wait=0')
             ->assertOk()
             ->assertJsonPath('data.recipient_phone', '0766666666');
+    }
+
+    public function test_relay_can_cancel_a_pending_transfer(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $user = User::factory()->create([
+            'phone' => '0755555555',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0766666666',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/transactions/'.$transaction->uuid.'/cancel', [
+            'note' => 'Client n’a pas payé',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.uuid', $transaction->uuid)
+            ->assertJsonPath('data.payment_status', 'cancelled');
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'cancelled',
+            'service_status' => 'cancelled',
+        ]);
+    }
+
+    public function test_relay_cannot_cancel_a_paid_transfer(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+        $orange->update(['receive_phone' => '70003333']);
+
+        $user = User::factory()->create([
+            'phone' => '0755555555',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0766666666',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/transactions/'.$transaction->uuid.'/confirm')
+            ->assertOk()
+            ->assertJsonPath('data.payment_status', 'paid');
+
+        $this->postJson('/api/relay/transactions/'.$transaction->uuid.'/cancel')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['uuid']);
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'received',
+        ]);
+    }
+
+    public function test_retry_stores_sms_and_links_matching_unused_deposit(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $user = User::factory()->create([
+            'phone' => '0755555555',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0766666666',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+        $total = (int) round((float) $transaction->totalAmount());
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/transactions/'.$transaction->uuid.'/retry', [
+            'deposits' => [[
+                'network' => 'orange',
+                'amount' => $total,
+                'provider_transaction_id' => 'PP260904.0915.RETRY1',
+                'sender_phone' => '0755555555',
+                'sender_name' => 'Client',
+                'received_at' => now()->addMinute()->toIso8601String(),
+                'raw_body' => 'Vous avez recu '.$total.' FCFA du 0755555555,CLIENT. Trans ID: PP260904.0915.RETRY1',
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.retry_matched', true)
+            ->assertJsonPath('data.payment_status', 'paid')
+            ->assertJsonPath('data.deposits_stored', 1)
+            ->assertJsonPath('data.deposit.provider_transaction_id', 'PP260904.0915.RETRY1');
+
+        $this->assertDatabaseHas('relay_deposits', [
+            'provider_transaction_id' => 'PP260904.0915.RETRY1',
+            'transaction_id' => $transaction->id,
+            'raw_body' => 'Vous avez recu '.$total.' FCFA du 0755555555,CLIENT. Trans ID: PP260904.0915.RETRY1',
+        ]);
+    }
+
+    public function test_retry_ignores_deposit_received_before_transaction(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $user = User::factory()->create([
+            'phone' => '0755555555',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0766666666',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+        $total = (int) round((float) $transaction->totalAmount());
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/transactions/'.$transaction->uuid.'/retry', [
+            'deposits' => [[
+                'network' => 'orange',
+                'amount' => $total,
+                'provider_transaction_id' => 'PP-OLD-1',
+                'sender_phone' => '0755555555',
+                'received_at' => now()->subHour()->toIso8601String(),
+                'raw_body' => 'Ancien SMS',
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.retry_matched', false)
+            ->assertJsonPath('data.payment_status', 'pending');
+
+        $this->assertDatabaseHas('relay_deposits', [
+            'provider_transaction_id' => 'PP-OLD-1',
+            'transaction_id' => null,
+        ]);
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'pending',
+        ]);
+    }
+
+    public function test_retry_does_not_reuse_sms_already_linked(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $user = User::factory()->create([
+            'phone' => '0755555555',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $first = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0766666666',
+        ])->assertCreated();
+
+        $tx1 = Transaction::query()->findOrFail($first->json('data.id'));
+        $total = (int) round((float) $tx1->totalAmount());
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/deposits', [
+            'network' => 'orange',
+            'amount' => $total,
+            'provider_transaction_id' => 'PP-USED-1',
+            'sender_phone' => '0755555555',
+            'received_at' => now()->toIso8601String(),
+        ])->assertCreated()->assertJsonPath('data.matched', true);
+
+        Sanctum::actingAs($user);
+
+        $second = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0767777777',
+        ])->assertCreated();
+
+        $tx2 = Transaction::query()->findOrFail($second->json('data.id'));
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/transactions/'.$tx2->uuid.'/retry', [
+            'deposits' => [[
+                'network' => 'orange',
+                'amount' => $total,
+                'provider_transaction_id' => 'PP-USED-1',
+                'sender_phone' => '0755555555',
+                'received_at' => now()->toIso8601String(),
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.retry_matched', false);
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $tx2->id,
+            'payment_status' => 'pending',
+        ]);
+        $this->assertDatabaseHas('relay_deposits', [
+            'provider_transaction_id' => 'PP-USED-1',
+            'transaction_id' => $tx1->id,
+        ]);
+    }
+
+    public function test_retry_requires_matching_phone(): void
+    {
+        $orange = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
+        $moov = TransferNetwork::query()->where('code', 'MOOV')->firstOrFail();
+
+        $user = User::factory()->create([
+            'phone' => '0755555555',
+            'pin' => '1234',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/transfers', [
+            'pin' => '1234',
+            'amount' => 100,
+            'source_network_id' => $orange->id,
+            'destination_network_id' => $moov->id,
+            'sender_phone' => '0755555555',
+            'recipient_phone' => '0766666666',
+        ])->assertCreated();
+
+        $transaction = Transaction::query()->findOrFail($created->json('data.id'));
+        $total = (int) round((float) $transaction->totalAmount());
+
+        Sanctum::actingAs($this->relayDevice());
+
+        $this->postJson('/api/relay/transactions/'.$transaction->uuid.'/retry', [
+            'deposits' => [[
+                'network' => 'orange',
+                'amount' => $total,
+                'provider_transaction_id' => 'PP-OTHER-PHONE',
+                'sender_phone' => '07018784',
+                'received_at' => now()->addMinute()->toIso8601String(),
+                'raw_body' => 'Vous avez recu '.$total.' FCFA du 07018784,DAOUDA.',
+            ]],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.retry_matched', false)
+            ->assertJsonPath('data.deposits_stored', 1);
+
+        $this->assertDatabaseHas('relay_deposits', [
+            'provider_transaction_id' => 'PP-OTHER-PHONE',
+            'transaction_id' => null,
+        ]);
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'payment_status' => 'pending',
+        ]);
     }
 
     public function test_user_token_cannot_access_relay(): void

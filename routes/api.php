@@ -12,6 +12,8 @@ Route::prefix('relay')->middleware('auth:sanctum')->group(function () {
     Route::get('transactions', [RelayController::class, 'transactions']);
     Route::get('pending-payments', [RelayController::class, 'pendingPayments']);
     Route::post('transactions/{uuid}/confirm', [RelayController::class, 'confirmPayment']);
+    Route::post('transactions/{uuid}/cancel', [RelayController::class, 'cancelPayment']);
+    Route::post('transactions/{uuid}/retry', [RelayController::class, 'retryPayment']);
     Route::get('jobs/next', [RelayController::class, 'nextJob']);
     Route::post('jobs/{uuid}/result', [RelayController::class, 'completeJob']);
 });
