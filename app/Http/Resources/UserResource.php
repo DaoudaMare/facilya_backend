@@ -24,6 +24,9 @@ class UserResource extends JsonResource
             'phone' => $this->phone,
             'phone_formatted' => $this->phone ? Phone::format($this->phone) : null,
             'needs_pin' => ! $this->hasPin(),
+            'referral_code' => $this->referral_code,
+            'reward_balance' => number_format((float) ($this->reward_balance ?? 0), 0, '.', ''),
+            'referred_by_user_id' => $this->referred_by_user_id,
         ];
     }
 

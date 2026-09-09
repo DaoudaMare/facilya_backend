@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             TransferNetworkSeeder::class,
             FeeSeeder::class,
             TravelCompanySeeder::class,
+            ReferralSettingSeeder::class,
         ]);
     }
 }

@@ -19,6 +19,7 @@ class AuthService
 {
     public function __construct(
         protected UserRepositoryInterface $users,
+        protected ReferralService $referrals,
     ) {}
 
     /**
@@ -45,8 +46,13 @@ class AuthService
     /**
      * @return array{token: string, user: User, needs_pin: bool}
      */
-    public function verifyOtp(string $channel, ?string $rawPhone, ?string $rawEmail, string $code): array
-    {
+    public function verifyOtp(
+        string $channel,
+        ?string $rawPhone,
+        ?string $rawEmail,
+        string $code,
+        ?string $referralCode = null,
+    ): array {
         $channel = $this->validatedChannel($channel);
         $destination = $this->destinationFor($channel, $rawPhone, $rawEmail);
         $expected = Cache::get($this->otpKey($channel, $destination));
@@ -75,7 +81,14 @@ class AuthService
         Cache::forget($this->otpKey($channel, $destination));
         Cache::forget($this->otpAttemptsKey($channel, $destination));
 
-        $user = $this->findOrCreate($channel, $destination);
+        [$user, $created] = $this->findOrCreateWithFlag($channel, $destination);
+        $user = $this->referrals->ensureReferralCode($user);
+
+        if ($created) {
+            $this->referrals->attachOnSignup($user, $referralCode);
+            $user = $user->fresh() ?? $user;
+        }
+
         $user->tokens()->where('name', 'mobile')->delete();
 
         return [
@@ -165,38 +178,41 @@ class AuthService
         }
     }
 
-    protected function findOrCreate(string $channel, string $destination): User
+    /**
+     * @return array{0: User, 1: bool}
+     */
+    protected function findOrCreateWithFlag(string $channel, string $destination): array
     {
         if ($channel === 'email') {
             $user = $this->users->findByEmail($destination);
 
             if ($user) {
-                return $user;
+                return [$user, false];
             }
 
             $local = Str::before($destination, '@');
 
-            return $this->users->create([
+            return [$this->users->create([
                 'name' => filled($local) ? Str::title(str_replace(['.', '_', '-'], ' ', $local)) : 'Client Facilya',
                 'email' => $destination,
                 'password' => Str::password(32),
                 'email_verified_at' => now(),
-            ]);
+            ]), true];
         }
 
         $user = $this->users->findByPhone($destination);
 
         if ($user) {
-            return $user;
+            return [$user, false];
         }
 
-        return $this->users->create([
+        return [$this->users->create([
             'name' => 'Client Facilya',
             'email' => $destination.'@users.facilya.local',
             'phone' => $destination,
             'password' => Str::password(32),
             'email_verified_at' => now(),
-        ]);
+        ]), true];
     }
 
     protected function destinationFor(string $channel, ?string $rawPhone, ?string $rawEmail): string

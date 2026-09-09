@@ -253,7 +253,9 @@ class TransactionService
         ]);
         $transaction->save();
 
-        return $transaction;
+        app(ReferralService::class)->rewardIfEligible($transaction->fresh() ?? $transaction);
+
+        return $transaction->fresh() ?? $transaction;
     }
 
     public function markServiceFailed(Transaction $transaction, string $reason): Transaction

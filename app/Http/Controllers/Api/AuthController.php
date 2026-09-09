@@ -38,6 +38,7 @@ class AuthController extends Controller
             'phone' => ['required_if:channel,sms,whatsapp', 'nullable', 'string', 'max:32'],
             'email' => ['required_if:channel,email', 'nullable', 'email', 'max:120'],
             'code' => ['required', 'string', 'size:6'],
+            'referral_code' => ['nullable', 'string', 'max:16'],
         ]);
 
         $result = $this->auth->verifyOtp(
@@ -45,6 +46,7 @@ class AuthController extends Controller
             $data['phone'] ?? null,
             $data['email'] ?? null,
             $data['code'],
+            $data['referral_code'] ?? null,
         );
 
         return response()->json([
@@ -73,8 +75,10 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
+        $user = app(\App\Services\ReferralService::class)->ensureReferralCode($request->user());
+
         return response()->json([
-            'data' => UserResource::make($request->user()),
+            'data' => UserResource::make($user),
         ]);
     }
 
