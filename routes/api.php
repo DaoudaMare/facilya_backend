@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AssistantController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\ReferralController;
@@ -45,5 +46,8 @@ Route::prefix('v1')->group(function () {
         Route::get('transactions/{transaction}', [TransactionController::class, 'show']);
         Route::post('transfers', [TransactionController::class, 'storeTransfer']);
         Route::post('tickets', [TransactionController::class, 'storeTicket']);
+
+        Route::post('assistant/chat', [AssistantController::class, 'chat'])
+            ->middleware('throttle:assistant');
     });
 });
