@@ -15,7 +15,12 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction
 # Build des assets front-end (CSS/JS Filament + Vite)
 RUN npm install && npm run build
 
-RUN mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache \
+RUN mkdir -p \
+      storage/framework/sessions \
+      storage/framework/views \
+      storage/framework/cache \
+      storage/logs \
+      bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
@@ -23,7 +28,9 @@ RUN mkdir -p /run/nginx
 
 COPY nginx.conf /etc/nginx/http.d/default.conf
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
 
 EXPOSE 8080
 
