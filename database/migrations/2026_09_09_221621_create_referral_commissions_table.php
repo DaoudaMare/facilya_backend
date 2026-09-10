@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('referral_commissions')) {
+            return;
+        }
+
         Schema::create('referral_commissions', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();

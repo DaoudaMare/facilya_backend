@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('reward_ledgers')) {
+            return;
+        }
+
         Schema::create('reward_ledgers', function (Blueprint $table) {
             $table->id();
             $table->uuid('uuid')->unique();
