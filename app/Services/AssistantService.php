@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class AssistantService
@@ -29,7 +30,21 @@ class AssistantService
             throw new RuntimeException('Le message ne peut pas être vide.');
         }
 
+        $started = microtime(true);
+
+        Log::info('assistant.ask.start', [
+            'user_id' => $user?->id,
+            'history_count' => count($history),
+            'departure' => $departure,
+            'arrival' => $arrival,
+        ]);
+
         $catalog = $this->context->build($user, $departure, $arrival);
+
+        Log::info('assistant.ask.context', [
+            'user_id' => $user?->id,
+            'context_length' => mb_strlen($catalog),
+        ]);
 
         $input = <<<PROMPT
 Contexte métier Facilya (données issues de la base, à utiliser pour répondre):
@@ -44,6 +59,14 @@ PROMPT;
         $reply = $result['reply'] !== ''
             ? $result['reply']
             : 'Je n’ai pas pu formuler de réponse. Reformulez votre question.';
+
+        Log::info('assistant.ask.done', [
+            'user_id' => $user?->id,
+            'duration_ms' => (int) ((microtime(true) - $started) * 1000),
+            'model' => $result['model'],
+            'usage' => $result['usage'] ?? null,
+            'empty_reply' => $result['reply'] === '',
+        ]);
 
         return [
             'reply' => $reply,

@@ -23,6 +23,7 @@ class GeminiClient
         $timeout = (int) config('services.gemini.timeout', 45);
 
         if ($apiKey === '') {
+            Log::error('gemini.config.missing_key');
             throw new RuntimeException('GEMINI_API_KEY n’est pas configurée.');
         }
 
@@ -61,6 +62,18 @@ class GeminiClient
         }
 
         $url = "{$baseUrl}/models/{$model}:generateContent";
+        $started = microtime(true);
+
+        Log::info('gemini.request', [
+            'model' => $model,
+            'url' => $url,
+            'timeout' => $timeout,
+            'history_turns' => max(0, count($contents) - 1),
+            'prompt_length' => mb_strlen($message),
+            'has_system_instruction' => $systemInstruction !== '',
+            'api_key_present' => true,
+            'api_key_suffix' => substr($apiKey, -4),
+        ]);
 
         try {
             $response = Http::withHeaders([
@@ -71,22 +84,32 @@ class GeminiClient
                 ->asJson()
                 ->post($url, $payload);
         } catch (ConnectionException $e) {
-            Log::error('Gemini connection failed', [
-                'message' => $e->getMessage(),
+            Log::error('gemini.connection_failed', [
+                'model' => $model,
+                'url' => $url,
+                'duration_ms' => (int) ((microtime(true) - $started) * 1000),
+                'error' => $e->getMessage(),
             ]);
 
             throw new RuntimeException('Impossible de joindre le service d’assistance pour le moment.');
         }
 
+        $durationMs = (int) ((microtime(true) - $started) * 1000);
         $json = $response->json();
         $json = is_array($json) ? $json : [];
 
         if (! $response->successful()) {
             $apiMessage = data_get($json, 'error.message');
+            $apiCode = data_get($json, 'error.code');
 
-            Log::error('Gemini API error', [
+            Log::error('gemini.api_error', [
+                'model' => $model,
+                'url' => $url,
                 'status' => $response->status(),
-                'message' => $apiMessage,
+                'duration_ms' => $durationMs,
+                'error_code' => $apiCode,
+                'error_message' => $apiMessage,
+                'body_preview' => mb_substr($response->body(), 0, 500),
             ]);
 
             throw new RuntimeException(
@@ -96,10 +119,24 @@ class GeminiClient
             );
         }
 
-        return [
-            'reply' => $this->extractText($json),
+        $reply = $this->extractText($json);
+        $usage = is_array($json['usageMetadata'] ?? null) ? $json['usageMetadata'] : null;
+        $finishReason = data_get($json, 'candidates.0.finishReason');
+
+        Log::info('gemini.response', [
             'model' => $model,
-            'usage' => is_array($json['usageMetadata'] ?? null) ? $json['usageMetadata'] : null,
+            'status' => $response->status(),
+            'duration_ms' => $durationMs,
+            'reply_length' => mb_strlen($reply),
+            'reply_preview' => mb_substr($reply, 0, 200),
+            'finish_reason' => $finishReason,
+            'usage' => $usage,
+        ]);
+
+        return [
+            'reply' => $reply,
+            'model' => $model,
+            'usage' => $usage,
         ];
     }
 
