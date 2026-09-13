@@ -1,0 +1,85 @@
+IDÉE DE STARTUP : SERVICE DE LIVRAISON DE COLIS INTER-VILLES
+(synergie avec Facilya - transport & réseau de compagnies de bus)
+================================================================
+
+CONCEPT
+-------
+Utiliser les bus inter-villes existants (partenaires déjà connus via Facilya)
+comme réseau de transport de colis, avec collecte et livraison porte-à-porte,
+sans avoir à gérer sa propre flotte de véhicules.
+
+COMMENT ÇA MARCHE
+------------------
+1. Collecte : l'expéditeur commande, un coursier (moto-taxi partenaire) vient
+   chercher le colis chez lui
+2. Transport inter-villes : le colis part sur un bus classique (espace bagages
+   sous-utilisé)
+3. Livraison finale : à l'arrivée, un coursier local livre chez le destinataire
+   (ou récupération en gare si le client préfère, option moins chère)
+
+OPTIONS DE SERVICE
+-------------------
+- Gare-à-gare (moins cher) : le client dépose et récupère lui-même en gare
+- Porte-à-porte (premium) : collecte + livraison à domicile des deux côtés
+- Le client choisit à la commande selon son besoin et son budget
+
+SOURCES DE REVENUS
+-------------------
+- Commission par colis (ex: 1000-1500 FCFA gare-à-gare)
+- Frais premium collecte à domicile (+500-1000 FCFA)
+- Frais premium livraison à domicile (+500-1000 FCFA)
+- Frais additionnels : tracking en temps réel, assurance colis
+- Abonnement B2B pour vendeurs/PME envoyant des colis régulièrement (tarif
+  préférentiel en volume)
+- Commission versée par les compagnies de transport (elles monétisent un
+  espace bagages inexploité)
+
+OBJECTIF CHIFFRE D'AFFAIRES : 2 000 000 FCFA/MOIS
+---------------------------------------------------
+- Avec ~1500 FCFA de commission moyenne par colis → environ 45 colis/jour
+  (~1350/mois) nécessaires
+- Objectif atteignable plus vite avec le modèle porte-à-porte (panier moyen
+  plus élevé : 2500-3500 FCFA/colis) + clients B2B réguliers
+
+MODÈLE OPÉRATIONNEL (SANS FLOTTE INTERNE)
+-------------------------------------------
+- Pas de coursiers salariés au départ : partenariat avec des motos-taxis
+  payés à la course (modèle à la demande, type Uber)
+- Points de collecte/dépôt : agences des compagnies de transport partenaires
+  (pas besoin de personnel dédié sur place)
+- MVP simple : commande via WhatsApp/formulaire, suivi via tableau partagé,
+  notifications SMS automatiques
+
+COMMENT LANCER EN GARDANT SON CDI
+------------------------------------
+1. Externaliser l'opérationnel dès le départ (coursiers partenaires, pas
+   d'employés)
+2. Trouver un associé/opérationnel de confiance à temps plein pour gérer le
+   quotidien (appels, suivi colis, service client, imprévus en journée)
+3. Automatiser/digitaliser un maximum (formulaires, SMS auto, tableau de
+   suivi) pour réduire le besoin de supervision constante
+4. Démarrer petit : 1-2 trajets seulement (ex: Ouaga-Bobo), 1-2 départs/jour,
+   zone de collecte restreinte
+5. Réserver ses soirs/weekends aux tâches stratégiques (négociation avec
+   compagnies, pricing, chiffres) — laisser le jour-le-jour à quelqu'un
+   d'autre
+
+POINTS DE VIGILANCE
+---------------------
+- Confiance : peur de perte/vol du colis → prévoir photo à la collecte et à
+  la remise, code de confirmation à chaque étape
+- Synchronisation horaire : la collecte doit être terminée avant l'heure de
+  départ du bus
+- Gestion des imprévus en journée (colis perdu, coursier absent, client
+  mécontent) = point de rupture principal si personne n'est disponible en
+  temps réel pendant les heures de bureau
+- Zone de couverture : limiter au départ aux quartiers proches des gares
+  pour garder des temps de collecte courts et rentables
+
+PROCHAINES ÉTAPES SUGGÉRÉES
+------------------------------
+- Valider avec les compagnies de transport partenaires (espace dispo,
+  conditions de partenariat)
+- Trouver la personne de confiance pour le rôle opérationnel terrain
+- Tester le MVP sur 1 seul trajet avec des outils simples (WhatsApp + Excel)
+  avant d'investir dans une app dédiée

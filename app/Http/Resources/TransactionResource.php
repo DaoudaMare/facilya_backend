@@ -53,6 +53,14 @@ class TransactionResource extends JsonResource
             'source_network' => TransferNetworkResource::make($this->whenLoaded('sourceNetwork')),
             'destination_network' => TransferNetworkResource::make($this->whenLoaded('destinationNetwork')),
             'payment_network' => TransferNetworkResource::make($this->whenLoaded('paymentNetwork')),
+            'parcel' => $this->when(
+                $this->isParcelShipment() && $this->relationLoaded('parcelShipment') && $this->parcelShipment,
+                fn () => ParcelShipmentResource::make($this->parcelShipment->loadMissing(['route.travelCompany', 'events'])),
+            ),
+            'trusted_payment' => $this->when(
+                $this->isTrustedPayment() && $this->relationLoaded('trustedPayment') && $this->trustedPayment,
+                fn () => TrustedPaymentResource::make($this->trustedPayment->loadMissing(['buyer', 'merchant', 'events'])),
+            ),
         ];
     }
 
@@ -63,6 +71,17 @@ class TransactionResource extends JsonResource
             $to = $this->destinationNetwork?->name ?? 'Réseau';
 
             return sprintf('%s → %s', $from, $to);
+        }
+
+        if ($this->isParcelShipment()) {
+            $departure = $this->route?->departure ?? 'Départ';
+            $arrival = $this->route?->arrival ?? 'Arrivée';
+
+            return sprintf('Colis %s → %s', $departure, $arrival);
+        }
+
+        if ($this->isTrustedPayment()) {
+            return 'Paiement confiant';
         }
 
         $departure = $this->route?->departure ?? 'Départ';
@@ -77,6 +96,26 @@ class TransactionResource extends JsonResource
             $who = $this->recipient_name ?: Phone::format((string) $this->recipient_phone);
 
             return trim($who.' · '.$this->created_at?->format('d/m, H\\hi'));
+        }
+
+        if ($this->isParcelShipment()) {
+            $who = $this->recipient_name ?: Phone::format((string) $this->recipient_phone);
+
+            return trim(implode(' · ', array_filter([
+                'Colis',
+                $who,
+                $this->created_at?->format('d/m, H\\hi'),
+            ])));
+        }
+
+        if ($this->isTrustedPayment()) {
+            $who = $this->recipient_name ?: Phone::format((string) $this->recipient_phone);
+
+            return trim(implode(' · ', array_filter([
+                'Escrow',
+                $who,
+                $this->created_at?->format('d/m, H\\hi'),
+            ])));
         }
 
         $company = $this->route?->travelCompany?->name;

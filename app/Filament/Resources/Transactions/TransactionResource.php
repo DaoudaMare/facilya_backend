@@ -79,6 +79,15 @@ class TransactionResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
-            ->with(['user', 'paymentNetwork', 'sourceNetwork', 'destinationNetwork', 'route.travelCompany', 'trip.station']);
+            ->with([
+                'user',
+                'paymentNetwork',
+                'sourceNetwork',
+                'destinationNetwork',
+                'route.travelCompany',
+                'trip.station',
+                'parcelShipment',
+                'trustedPayment',
+            ]);
     }
 }

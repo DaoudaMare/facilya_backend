@@ -136,6 +136,22 @@ class TravelCompanyService
     }
 
     /**
+     * @return Collection<int, TravelCompanyRoute>
+     */
+    public function listParcelRoutes(?string $departure = null, ?string $arrival = null): Collection
+    {
+        return $this->routes->listAcceptingParcels($departure, $arrival);
+    }
+
+    /**
+     * @return list<array{departure: string, arrival: string, from_price: string, agencies_count: int}>
+     */
+    public function parcelCorridors(int $limit = 50): array
+    {
+        return $this->routes->parcelCorridors($limit);
+    }
+
+    /**
      * @param  array<string, mixed>  $attributes
      */
     public function createTrip(array $attributes): TravelCompanyTrip

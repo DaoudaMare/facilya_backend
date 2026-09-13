@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Transactions\Tables;
 use App\Data\PaymentStatusEnum;
 use App\Data\ServiceStatusEnum;
 use App\Data\TransactionTypeEnum;
+use App\Filament\Resources\Transactions\Support\TransactionStatusActions;
 use App\Models\Transaction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -56,10 +57,22 @@ class TransactionsTable
                     ->toggleable(),
                 TextColumn::make('payment_status')
                     ->label('Paiement')
-                    ->badge(),
+                    ->badge()
+                    ->description(fn (Transaction $record): ?string => TransactionStatusActions::nextStepHint($record)),
                 TextColumn::make('service_status')
                     ->label('Service')
-                    ->badge(),
+                    ->badge()
+                    ->formatStateUsing(function ($state, Transaction $record) {
+                        if ($record->isParcelShipment() && $record->parcelShipment) {
+                            return $record->parcelShipment->status?->label() ?? $state;
+                        }
+
+                        if ($record->isTrustedPayment() && $record->trustedPayment) {
+                            return $record->trustedPayment->status?->label() ?? $state;
+                        }
+
+                        return $state;
+                    }),
                 TextColumn::make('amount')
                     ->label('Montant')
                     ->numeric()
@@ -103,6 +116,7 @@ class TransactionsTable
             ])
             ->recordActions([
                 ViewAction::make(),
+                TransactionStatusActions::tableActionGroup(),
                 EditAction::make(),
             ])
             ->toolbarActions([

@@ -81,6 +81,7 @@ class TravelCompanySeeder extends Seeder
                     [
                         'price' => $price,
                         'is_active' => true,
+                        'accepts_parcels' => true,
                     ],
                 );
 

@@ -62,6 +62,21 @@ class TravelCompanyRouteRepository extends BaseRepository implements TravelCompa
     }
 
     /**
+     * @return Collection<int, TravelCompanyRoute>
+     */
+    public function listAcceptingParcels(?string $departure = null, ?string $arrival = null): Collection
+    {
+        return $this->query()
+            ->with('travelCompany')
+            ->where('is_active', true)
+            ->where('accepts_parcels', true)
+            ->when($departure, fn ($query) => $query->where('departure', $departure))
+            ->when($arrival, fn ($query) => $query->where('arrival', $arrival))
+            ->orderBy('price')
+            ->get();
+    }
+
+    /**
      * @return list<string>
      */
     public function distinctCities(): array
@@ -75,6 +90,29 @@ class TravelCompanyRouteRepository extends BaseRepository implements TravelCompa
             ->unique()
             ->sort()
             ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<array{departure: string, arrival: string, from_price: string, agencies_count: int}>
+     */
+    public function parcelCorridors(int $limit = 50): array
+    {
+        return $this->query()
+            ->where('is_active', true)
+            ->where('accepts_parcels', true)
+            ->selectRaw('departure, arrival, MIN(price) as from_price, COUNT(*) as agencies_count')
+            ->groupBy('departure', 'arrival')
+            ->orderBy('departure')
+            ->orderBy('arrival')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => [
+                'departure' => (string) $row->departure,
+                'arrival' => (string) $row->arrival,
+                'from_price' => number_format((float) $row->from_price, 0, '.', ''),
+                'agencies_count' => (int) $row->agencies_count,
+            ])
             ->all();
     }
 

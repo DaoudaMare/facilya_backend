@@ -16,6 +16,7 @@ class TravelCompanyRoute extends Model
         'travel_type',
         'price',
         'is_active',
+        'accepts_parcels',
     ];
 
     protected function casts(): array
@@ -24,6 +25,7 @@ class TravelCompanyRoute extends Model
             'travel_type' => TravelTypeEnum::class,
             'price' => 'decimal:2',
             'is_active' => 'boolean',
+            'accepts_parcels' => 'boolean',
         ];
     }
 

@@ -45,6 +45,10 @@ class TravelCompanyRouteForm
                         Toggle::make('is_active')
                             ->label('Actif')
                             ->default(true),
+                        Toggle::make('accepts_parcels')
+                            ->label('Transporte les colis')
+                            ->helperText('Si activé, ce trajet apparaît dans le flux d’envoi de colis.')
+                            ->default(false),
                     ]),
             ]);
     }

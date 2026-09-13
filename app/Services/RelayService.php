@@ -284,6 +284,11 @@ class RelayService
             $this->transactions->markPaymentReceived($transaction, $deposit->provider_transaction_id);
         }
 
+        if ($transaction->fresh()?->isParcelShipment()) {
+            app(ParcelShipmentService::class)
+                ->confirmAfterPayment($transaction->fresh() ?? $transaction);
+        }
+
         $deposit->fill([
             'transaction_id' => $transaction->id,
             'matched_at' => $deposit->matched_at ?? now(),
@@ -300,7 +305,7 @@ class RelayService
             if (! $transaction->isServed()) {
                 $this->transactions->fulfillAfterPayment($transaction);
             }
-        } else {
+        } elseif ($transaction->isNetworkTransfer()) {
             $service = $transaction->service_status;
             $serviceValue = $service instanceof ServiceStatusEnum
                 ? $service
@@ -311,6 +316,15 @@ class RelayService
             }
 
             $this->createFulfillmentJob($transaction);
+        } elseif ($transaction->isParcelShipment() || $transaction->isTrustedPayment()) {
+            $service = $transaction->service_status;
+            $serviceValue = $service instanceof ServiceStatusEnum
+                ? $service
+                : ServiceStatusEnum::tryFrom((string) $service);
+
+            if ($serviceValue === ServiceStatusEnum::PENDING) {
+                $this->transactions->markServiceProcessing($transaction);
+            }
         }
 
         return $transaction->fresh([
@@ -422,7 +436,9 @@ class RelayService
         $transaction = $job->transaction;
 
         if ($transaction) {
-            if ($succeeded) {
+            if ($transaction->isTrustedPayment()) {
+                app(TrustedPaymentService::class)->handlePayoutJobResult($job, $succeeded);
+            } elseif ($succeeded) {
                 $this->transactions->markServiceDelivered(
                     $transaction,
                     $job->provider_reference ?: 'SVC-'.$transaction->reference,

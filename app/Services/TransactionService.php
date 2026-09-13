@@ -56,6 +56,28 @@ class TransactionService
     /**
      * @param  array<string, mixed>  $attributes
      */
+    public function createParcelShipment(array $attributes): Transaction
+    {
+        return $this->create([
+            ...$attributes,
+            'type' => TransactionTypeEnum::PARCEL_SHIPMENT,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    public function createTrustedPayment(array $attributes): Transaction
+    {
+        return $this->create([
+            ...$attributes,
+            'type' => TransactionTypeEnum::TRUSTED_PAYMENT,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
     public function update(Transaction $transaction, array $attributes): Transaction
     {
         return $this->transactions->update($transaction, $this->sanitize($attributes, $transaction));
@@ -107,6 +129,8 @@ class TransactionService
         }
 
         $networkId = $transaction->isTicketPurchase()
+            || $transaction->isParcelShipment()
+            || $transaction->isTrustedPayment()
             ? $transaction->payment_network_id
             : $transaction->source_network_id;
 
@@ -146,7 +170,7 @@ class TransactionService
             );
         }
 
-        $networkId = $type === TransactionTypeEnum::TICKET_PURCHASE
+        $networkId = $type === TransactionTypeEnum::TICKET_PURCHASE || $type === TransactionTypeEnum::PARCEL_SHIPMENT
             ? ($state['payment_network_id'] ?? null)
             : ($state['source_network_id'] ?? null);
 
@@ -197,7 +221,11 @@ class TransactionService
         ]);
         $transaction->save();
 
-        return $transaction;
+        if ($transaction->isTrustedPayment()) {
+            app(TrustedPaymentService::class)->confirmPayment($transaction->fresh() ?? $transaction);
+        }
+
+        return $transaction->fresh() ?? $transaction;
     }
 
     public function markPaymentFailed(Transaction $transaction, string $reason): Transaction
@@ -435,6 +463,17 @@ class TransactionService
 
     public function syncTicketRouteFromTrip(Transaction $transaction): void
     {
+        if ($transaction->isParcelShipment() || $transaction->isTrustedPayment()) {
+            $transaction->travel_company_trip_id = null;
+            $transaction->travel_date = null;
+
+            if ($transaction->isTrustedPayment()) {
+                $transaction->travel_company_route_id = null;
+            }
+
+            return;
+        }
+
         if (! $transaction->isTicketPurchase()) {
             $transaction->travel_company_route_id = null;
             $transaction->travel_company_trip_id = null;
@@ -510,6 +549,18 @@ class TransactionService
             $attributes['sender_phone'] = null;
             $attributes['recipient_phone'] = null;
             $attributes['recipient_name'] = null;
+        } elseif ($type === TransactionTypeEnum::PARCEL_SHIPMENT || $type === TransactionTypeEnum::TRUSTED_PAYMENT) {
+            $attributes['travel_company_trip_id'] = null;
+            $attributes['travel_date'] = null;
+            $attributes['passenger_name'] = null;
+            $attributes['passenger_phone'] = null;
+            $attributes['passenger_count'] = null;
+            $attributes['source_network_id'] = null;
+            $attributes['destination_network_id'] = null;
+
+            if ($type === TransactionTypeEnum::TRUSTED_PAYMENT) {
+                $attributes['travel_company_route_id'] = null;
+            }
         } else {
             $sourceId = $attributes['source_network_id'] ?? $existing?->source_network_id;
             $destinationId = $attributes['destination_network_id'] ?? $existing?->destination_network_id;
@@ -531,6 +582,19 @@ class TransactionService
         return $attributes;
     }
 
+    public function assertReceivesPayments(int $id, string $field): TransferNetwork
+    {
+        $network = $this->assertSendable($id, $field);
+
+        if (blank($network->receive_phone) || ! Phone::isValid((string) $network->receive_phone)) {
+            throw ValidationException::withMessages([
+                $field => 'Ce réseau n’a pas encore de numéro de réception configuré.',
+            ]);
+        }
+
+        return $network;
+    }
+
     protected function assertSendable(int $id, string $field): TransferNetwork
     {
         $network = TransferNetwork::query()->find($id);
@@ -538,19 +602,6 @@ class TransactionService
         if (! $network || ! $network->is_active || ! $network->can_send) {
             throw ValidationException::withMessages([
                 $field => 'Ce réseau ne peut pas être utilisé pour envoyer ou payer.',
-            ]);
-        }
-
-        return $network;
-    }
-
-    protected function assertReceivesPayments(int $id, string $field): TransferNetwork
-    {
-        $network = $this->assertSendable($id, $field);
-
-        if (blank($network->receive_phone) || ! Phone::isValid((string) $network->receive_phone)) {
-            throw ValidationException::withMessages([
-                $field => 'Ce réseau n’a pas encore de numéro de réception configuré.',
             ]);
         }
 

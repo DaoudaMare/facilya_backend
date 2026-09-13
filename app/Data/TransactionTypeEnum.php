@@ -9,12 +9,16 @@ enum TransactionTypeEnum: string implements HasColor, HasLabel
 {
     case TICKET_PURCHASE = 'ticket_purchase';
     case NETWORK_TRANSFER = 'network_transfer';
+    case PARCEL_SHIPMENT = 'parcel_shipment';
+    case TRUSTED_PAYMENT = 'trusted_payment';
 
     public function label(): string
     {
         return match ($this) {
             self::TICKET_PURCHASE => 'Achat de ticket',
             self::NETWORK_TRANSFER => 'Transfert inter-réseau',
+            self::PARCEL_SHIPMENT => 'Expédition colis',
+            self::TRUSTED_PAYMENT => 'Paiement confiant',
         };
     }
 
@@ -23,6 +27,8 @@ enum TransactionTypeEnum: string implements HasColor, HasLabel
         return match ($this) {
             self::TICKET_PURCHASE => 'TK',
             self::NETWORK_TRANSFER => 'TF',
+            self::PARCEL_SHIPMENT => 'PC',
+            self::TRUSTED_PAYMENT => 'CF',
         };
     }
 
@@ -36,6 +42,8 @@ enum TransactionTypeEnum: string implements HasColor, HasLabel
         return match ($this) {
             self::TICKET_PURCHASE => 'info',
             self::NETWORK_TRANSFER => 'warning',
+            self::PARCEL_SHIPMENT => 'success',
+            self::TRUSTED_PAYMENT => 'primary',
         };
     }
 }

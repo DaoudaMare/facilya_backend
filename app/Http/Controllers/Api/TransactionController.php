@@ -21,7 +21,7 @@ class TransactionController extends Controller
     public function index(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'type' => ['nullable', Rule::in(['network_transfer', 'ticket_purchase'])],
+            'type' => ['nullable', Rule::in(['network_transfer', 'ticket_purchase', 'parcel_shipment', 'trusted_payment'])],
         ]);
 
         return response()->json([

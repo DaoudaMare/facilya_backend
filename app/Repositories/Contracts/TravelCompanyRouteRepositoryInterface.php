@@ -31,9 +31,19 @@ interface TravelCompanyRouteRepositoryInterface
     public function listActive(?int $companyId = null): Collection;
 
     /**
+     * @return Collection<int, TravelCompanyRoute>
+     */
+    public function listAcceptingParcels(?string $departure = null, ?string $arrival = null): Collection;
+
+    /**
      * @return list<string>
      */
     public function distinctCities(): array;
+
+    /**
+     * @return list<array{departure: string, arrival: string, from_price: string, agencies_count: int}>
+     */
+    public function parcelCorridors(int $limit = 50): array;
 
     /**
      * @return list<array{departure: string, arrival: string, from_price: string}>

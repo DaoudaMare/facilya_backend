@@ -38,6 +38,9 @@ class TravelCompanyRoutesTable
                 IconColumn::make('is_active')
                     ->label('Actif')
                     ->boolean(),
+                IconColumn::make('accepts_parcels')
+                    ->label('Colis')
+                    ->boolean(),
             ])
             ->filters([
                 SelectFilter::make('travel_company_id')
@@ -46,6 +49,12 @@ class TravelCompanyRoutesTable
                 SelectFilter::make('travel_type')
                     ->label('Type')
                     ->options(TravelTypeEnum::class),
+                SelectFilter::make('accepts_parcels')
+                    ->label('Colis')
+                    ->options([
+                        1 => 'Oui',
+                        0 => 'Non',
+                    ]),
             ])
             ->recordActions([
                 EditAction::make(),

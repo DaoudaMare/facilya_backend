@@ -97,6 +97,11 @@ class TransactionRepository extends BaseRepository implements TransactionReposit
                 'paymentNetwork',
                 'route.travelCompany',
                 'trip.station',
+                'parcelShipment.route.travelCompany',
+                'parcelShipment.events',
+                'trustedPayment.buyer',
+                'trustedPayment.merchant',
+                'trustedPayment.events',
             ])
             ->where('user_id', $userId)
             ->when($type, fn ($query) => $query->where('type', $type))
@@ -134,6 +139,11 @@ class TransactionRepository extends BaseRepository implements TransactionReposit
                 'paymentNetwork',
                 'route.travelCompany',
                 'trip.station',
+                'parcelShipment.route.travelCompany',
+                'parcelShipment.events',
+                'trustedPayment.buyer',
+                'trustedPayment.merchant',
+                'trustedPayment.events',
             ])
             ->where('user_id', $userId)
             ->whereKey($id)

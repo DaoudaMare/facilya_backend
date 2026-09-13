@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PromotionResource;
 use App\Http\Resources\TransferNetworkResource;
+use App\Http\Resources\TravelRouteResource;
 use App\Http\Resources\TravelTripResource;
 use App\Services\PromotionService;
 use App\Services\TransferNetworkService;
@@ -45,6 +46,41 @@ class CatalogController extends Controller
     {
         return response()->json([
             'data' => $this->travel->popularCorridors(),
+        ]);
+    }
+
+    public function routes(): JsonResponse
+    {
+        return response()->json([
+            'data' => TravelRouteResource::collection($this->travel->listActiveRoutes()),
+        ]);
+    }
+
+    public function parcelCorridors(): JsonResponse
+    {
+        return response()->json([
+            'data' => $this->travel->parcelCorridors(),
+        ]);
+    }
+
+    public function parcelRoutes(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'departure' => ['required', 'string', 'max:120'],
+            'arrival' => ['required', 'string', 'max:120'],
+        ]);
+
+        $routes = $this->travel->listParcelRoutes($data['departure'], $data['arrival']);
+
+        if ($routes->isEmpty()) {
+            return response()->json([
+                'message' => 'Aucun transporteur de colis sur ce corridor.',
+                'data' => [],
+            ], 404);
+        }
+
+        return response()->json([
+            'data' => TravelRouteResource::collection($routes),
         ]);
     }
 

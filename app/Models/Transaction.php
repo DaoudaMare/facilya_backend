@@ -119,26 +119,6 @@ class Transaction extends Model
         return $this->hasMany(RelayJob::class);
     }
 
-    public function payingNetwork(): ?TransferNetwork
-    {
-        return $this->isTicketPurchase() ? $this->paymentNetwork : $this->sourceNetwork;
-    }
-
-    public function payerPhone(): ?string
-    {
-        return $this->isTicketPurchase() ? $this->passenger_phone : $this->sender_phone;
-    }
-
-    public static function newTicketPurchase(array $attributes): static
-    {
-        return app(TransactionService::class)->createTicketPurchase($attributes);
-    }
-
-    public static function newNetworkTransfer(array $attributes): static
-    {
-        return app(TransactionService::class)->createNetworkTransfer($attributes);
-    }
-
     public function isTicketPurchase(): bool
     {
         return $this->type === TransactionTypeEnum::TICKET_PURCHASE;
@@ -147,6 +127,46 @@ class Transaction extends Model
     public function isNetworkTransfer(): bool
     {
         return $this->type === TransactionTypeEnum::NETWORK_TRANSFER;
+    }
+
+    public function isParcelShipment(): bool
+    {
+        return $this->type === TransactionTypeEnum::PARCEL_SHIPMENT;
+    }
+
+    public function isTrustedPayment(): bool
+    {
+        return $this->type === TransactionTypeEnum::TRUSTED_PAYMENT;
+    }
+
+    public function payingNetwork(): ?TransferNetwork
+    {
+        return ($this->isTicketPurchase() || $this->isParcelShipment() || $this->isTrustedPayment())
+            ? $this->paymentNetwork
+            : $this->sourceNetwork;
+    }
+
+    public function payerPhone(): ?string
+    {
+        if ($this->isTicketPurchase()) {
+            return $this->passenger_phone;
+        }
+
+        if ($this->isParcelShipment() || $this->isTrustedPayment()) {
+            return $this->sender_phone;
+        }
+
+        return $this->sender_phone;
+    }
+
+    public function parcelShipment(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(ParcelShipment::class);
+    }
+
+    public function trustedPayment(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(TrustedPayment::class);
     }
 
     public function isPaid(): bool
