@@ -53,6 +53,7 @@ class AuthController extends Controller
             'data' => [
                 'token' => $result['token'],
                 'needs_pin' => $result['needs_pin'],
+                'is_new' => $result['is_new'],
                 'user' => UserResource::make($result['user']),
             ],
         ]);
@@ -85,7 +86,17 @@ class AuthController extends Controller
     public function updateMe(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:120'],
+            'first_name' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'last_name' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'name' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'phone_secondary' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'cnib_number' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'cnib_photo' => ['sometimes', 'nullable', 'image', 'max:5120'],
+            'addresses' => ['sometimes', 'array', 'max:8'],
+            'addresses.*.id' => ['nullable', 'integer'],
+            'addresses.*.name' => ['nullable', 'string', 'max:80'],
+            'addresses.*.maps_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
         $user = $this->auth->updateProfile($request->user(), $data);

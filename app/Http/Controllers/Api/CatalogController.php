@@ -7,9 +7,11 @@ use App\Http\Resources\PromotionResource;
 use App\Http\Resources\TransferNetworkResource;
 use App\Http\Resources\TravelRouteResource;
 use App\Http\Resources\TravelTripResource;
+use App\Models\AppSetting;
 use App\Services\PromotionService;
 use App\Services\TransferNetworkService;
 use App\Services\TravelCompanyService;
+use App\Support\Phone;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -20,6 +22,22 @@ class CatalogController extends Controller
         protected TravelCompanyService $travel,
         protected PromotionService $promotions,
     ) {}
+
+    public function config(): JsonResponse
+    {
+        $settings = AppSetting::current();
+        $phone = $settings->support_whatsapp_phone;
+
+        return response()->json([
+            'data' => [
+                'support' => [
+                    'whatsapp_phone' => $phone,
+                    'whatsapp_formatted' => filled($phone) ? Phone::format((string) $phone) : null,
+                    'whatsapp_url' => $settings->supportWhatsAppUrl(),
+                ],
+            ],
+        ]);
+    }
 
     public function networks(): JsonResponse
     {

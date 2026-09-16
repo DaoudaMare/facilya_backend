@@ -2,7 +2,6 @@
 
 namespace App\Channels;
 
-use App\Notifications\OtpCodeNotification;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Http;
@@ -13,7 +12,7 @@ class SmsChannel
 {
     public function send(object $notifiable, Notification $notification): void
     {
-        if (! $notification instanceof OtpCodeNotification) {
+        if (! method_exists($notification, 'toSms')) {
             return;
         }
 
@@ -32,7 +31,7 @@ class SmsChannel
             return;
         }
 
-        Log::info('OTP SMS', [
+        Log::info('SMS', [
             'to' => $to,
             'message' => $message,
         ]);

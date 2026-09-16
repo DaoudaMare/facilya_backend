@@ -31,7 +31,7 @@ class ApiAuthAndCatalogTest extends TestCase
 
         $this->postJson('/api/v1/auth/otp/request', [
             'channel' => 'sms',
-            'phone' => '0700000000',
+            'phone' => '0712345600',
         ])
             ->assertOk()
             ->assertJsonPath('data.channel', 'sms')
@@ -39,12 +39,12 @@ class ApiAuthAndCatalogTest extends TestCase
 
         Notification::assertSentOnDemand(OtpCodeNotification::class);
 
-        $otp = Cache::get('auth.otp.sms.0700000000');
+        $otp = Cache::get('auth.otp.sms.0712345600');
         $this->assertNotEmpty($otp);
 
         $verify = $this->postJson('/api/v1/auth/otp/verify', [
             'channel' => 'sms',
-            'phone' => '07 00 00 00 00',
+            'phone' => '07 12 34 56 00',
             'code' => $otp,
         ]);
 
@@ -219,5 +219,97 @@ class ApiAuthAndCatalogTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.user.phone', '70111111');
+    }
+
+    public function test_profile_update_name_phones_and_pickup_addresses(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Client Facilya',
+            'first_name' => null,
+            'last_name' => null,
+            'email' => 'marie@example.com',
+            'phone' => null,
+        ]);
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/me')
+            ->assertOk()
+            ->assertJsonPath('data.profile_complete', false)
+            ->assertJsonPath('data.is_email_account', true);
+
+        $this->patchJson('/api/v1/me', [
+            'first_name' => 'Marie',
+            'last_name' => 'Kaboré',
+            'phone' => '07654321',
+            'phone_secondary' => '07 65 43 22',
+            'addresses' => [
+                [
+                    'name' => 'Domicile',
+                    'maps_url' => 'https://maps.app.goo.gl/homeMarie',
+                ],
+                [
+                    'name' => 'Boutique',
+                    'maps_url' => 'https://www.google.com/maps/place/Ouaga',
+                ],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.first_name', 'Marie')
+            ->assertJsonPath('data.last_name', 'Kaboré')
+            ->assertJsonPath('data.name', 'Marie Kaboré')
+            ->assertJsonPath('data.phone', '07654321')
+            ->assertJsonPath('data.phone_secondary', '07654322')
+            ->assertJsonPath('data.profile_complete', true)
+            ->assertJsonPath('data.addresses.0.name', 'Domicile')
+            ->assertJsonCount(2, 'data.addresses');
+    }
+
+    public function test_profile_cnib_photo_can_be_saved_via_post_me(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+
+        $user = User::factory()->create(['phone' => '0711111166']);
+        Sanctum::actingAs($user);
+
+        $this->withHeaders(['Accept' => 'application/json'])
+            ->post('/api/v1/me', [
+                'cnib_number' => 'B99887766',
+                'cnib_photo' => \Illuminate\Http\UploadedFile::fake()->image('cnib.jpg'),
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.cnib_number', 'B99887766');
+
+        $user->refresh();
+        $this->assertNotEmpty($user->cnib_photo);
+        $this->assertNotEmpty($user->cnibPhotoUrl());
+        $this->assertTrue(\Illuminate\Support\Facades\Storage::disk('public')->exists($user->cnib_photo));
+    }
+
+    public function test_second_phone_cannot_match_primary_and_addresses_must_be_maps(): void
+    {
+        $user = User::factory()->create(['phone' => '0711111100']);
+        Sanctum::actingAs($user);
+
+        $this->patchJson('/api/v1/me', [
+            'phone_secondary' => '0711111100',
+        ])->assertUnprocessable();
+
+        $this->patchJson('/api/v1/me', [
+            'addresses' => [
+                ['name' => 'Domicile', 'maps_url' => 'Ouaga secteur 15'],
+            ],
+        ])->assertUnprocessable();
+    }
+
+    public function test_app_config_exposes_support_whatsapp(): void
+    {
+        \App\Models\AppSetting::current()->update([
+            'support_whatsapp_phone' => '70112233',
+        ]);
+
+        $this->getJson('/api/v1/config')
+            ->assertOk()
+            ->assertJsonPath('data.support.whatsapp_phone', '70112233')
+            ->assertJsonPath('data.support.whatsapp_url', 'https://wa.me/22670112233');
     }
 }

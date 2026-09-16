@@ -7,15 +7,19 @@ use App\Filament\Resources\Promotions\Pages\EditPromotion;
 use App\Filament\Resources\Promotions\Pages\ListPromotions;
 use App\Filament\Resources\Promotions\Schemas\PromotionForm;
 use App\Filament\Resources\Promotions\Tables\PromotionsTable;
+use App\Filament\Support\AuthorizesPermissions;
 use App\Models\Promotion;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class PromotionResource extends Resource
 {
+    use AuthorizesPermissions;
+
     protected static ?string $model = Promotion::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedMegaphone;
@@ -49,5 +53,25 @@ class PromotionResource extends Resource
             'create' => CreatePromotion::route('/create'),
             'edit' => EditPromotion::route('/{record}/edit'),
         ];
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccessManage('settings.manage');
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canAccessManage('settings.manage');
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canAccessManage('settings.manage');
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canAccessManage('settings.manage');
     }
 }

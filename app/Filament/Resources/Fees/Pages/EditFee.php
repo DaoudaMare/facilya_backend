@@ -25,4 +25,9 @@ class EditFee extends EditRecord
         /** @var Fee $record */
         return app(FeeService::class)->update($record, $data);
     }
+
+    protected function getRedirectUrl(): string
+    {
+        return \App\Filament\Pages\Configuration::tabUrl('frais');
+    }
 }

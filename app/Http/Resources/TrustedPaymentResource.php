@@ -64,6 +64,13 @@ class TrustedPaymentResource extends JsonResource
                 'currency' => $this->currency,
             ],
             'payout_reference' => $this->payout_reference,
+            'parcel_shipment' => $this->when(
+                $this->relationLoaded('parcelShipment') && $this->parcelShipment,
+                fn () => [
+                    'uuid' => $this->parcelShipment->uuid,
+                    'reference' => $this->parcelShipment->reference,
+                ],
+            ),
             'timestamps' => [
                 'funds_held_at' => $this->funds_held_at?->toIso8601String(),
                 'expedition_requested_at' => $this->expedition_requested_at?->toIso8601String(),

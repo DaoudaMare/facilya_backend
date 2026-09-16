@@ -7,15 +7,19 @@ use App\Filament\Resources\TravelCompanyRoutes\Pages\EditTravelCompanyRoute;
 use App\Filament\Resources\TravelCompanyRoutes\Pages\ListTravelCompanyRoutes;
 use App\Filament\Resources\TravelCompanyRoutes\Schemas\TravelCompanyRouteForm;
 use App\Filament\Resources\TravelCompanyRoutes\Tables\TravelCompanyRoutesTable;
+use App\Filament\Support\AuthorizesPermissions;
 use App\Models\TravelCompanyRoute;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class TravelCompanyRouteResource extends Resource
 {
+    use AuthorizesPermissions;
+
     protected static ?string $model = TravelCompanyRoute::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;
@@ -61,5 +65,25 @@ class TravelCompanyRouteResource extends Resource
     public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
     {
         return parent::getEloquentQuery()->with('travelCompany');
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccessManage('travel.manage');
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canAccessManage('travel.manage');
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canAccessManage('travel.manage');
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canAccessManage('travel.manage');
     }
 }

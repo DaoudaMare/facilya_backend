@@ -56,4 +56,10 @@ return [
         'project_name' => env('GEMINI_PROJECT_NAME'),
     ],
 
+    'mapbox' => [
+        'token' => env('MAPBOX_ACCESS_TOKEN'),
+        'default_origin_lat' => (float) env('MAPBOX_DEFAULT_ORIGIN_LAT', 12.3714),
+        'default_origin_lng' => (float) env('MAPBOX_DEFAULT_ORIGIN_LNG', -1.5197),
+    ],
+
 ];

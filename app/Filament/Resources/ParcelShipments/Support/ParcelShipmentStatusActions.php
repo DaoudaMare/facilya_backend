@@ -4,12 +4,16 @@ namespace App\Filament\Resources\ParcelShipments\Support;
 
 use App\Data\ParcelDeliveryModeEnum;
 use App\Data\ParcelStatusEnum;
+use App\Data\TrustedPaymentStatusEnum;
 use App\Models\ParcelShipment;
+use App\Models\User;
 use App\Services\ParcelShipmentService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class ParcelShipmentStatusActions
@@ -21,6 +25,10 @@ class ParcelShipmentStatusActions
      */
     public static function headerActionsFor(ParcelShipment $shipment): array
     {
+        if (! self::userCanManage()) {
+            return [];
+        }
+
         return array_map(
             fn (ParcelStatusEnum $next) => self::makeTransitionAction($next, highlight: self::isPrimaryNext($shipment, $next)),
             self::allowedStatuses($shipment),
@@ -36,7 +44,7 @@ class ParcelShipmentStatusActions
             array_map(
                 function (ParcelStatusEnum $next) {
                     return self::makeTransitionAction($next, highlight: false)
-                        ->visible(fn (ParcelShipment $record): bool => self::isAllowed($record, $next));
+                        ->visible(fn (ParcelShipment $record): bool => self::userCanManage() && self::isAllowed($record, $next));
                 },
                 self::allTransitionTargets(),
             )
@@ -45,7 +53,7 @@ class ParcelShipmentStatusActions
             ->icon('heroicon-o-arrow-path')
             ->button()
             ->color('primary')
-            ->visible(fn (ParcelShipment $record): bool => self::canAdvance($record));
+            ->visible(fn (ParcelShipment $record): bool => self::userCanManage() && self::canAdvance($record));
     }
 
     /**
@@ -59,6 +67,7 @@ class ParcelShipmentStatusActions
             ParcelStatusEnum::Collected,
             ParcelStatusEnum::Shipped,
             ParcelStatusEnum::ArrivedStation,
+            ParcelStatusEnum::OutForDelivery,
             ParcelStatusEnum::Delivered,
             ParcelStatusEnum::PickedUp,
             ParcelStatusEnum::Cancelled,
@@ -71,14 +80,7 @@ class ParcelShipmentStatusActions
      */
     protected static function allowedStatuses(ParcelShipment $shipment): array
     {
-        $current = self::statusOf($shipment);
-        $mode = self::modeOf($shipment);
-
-        if (! $current || ! $mode) {
-            return [];
-        }
-
-        return $current->allowedNext($mode);
+        return $shipment->allowedNextStatuses();
     }
 
     public static function canAdvance(ParcelShipment $shipment): bool
@@ -123,6 +125,7 @@ class ParcelShipmentStatusActions
                 ParcelStatusEnum::Collected => 'heroicon-o-archive-box',
                 ParcelStatusEnum::Shipped => 'heroicon-o-paper-airplane',
                 ParcelStatusEnum::ArrivedStation => 'heroicon-o-building-storefront',
+                ParcelStatusEnum::OutForDelivery => 'heroicon-o-truck',
                 ParcelStatusEnum::Delivered, ParcelStatusEnum::PickedUp => 'heroicon-o-check-badge',
                 ParcelStatusEnum::Cancelled => 'heroicon-o-x-circle',
                 ParcelStatusEnum::Failed => 'heroicon-o-exclamation-triangle',
@@ -136,13 +139,27 @@ class ParcelShipmentStatusActions
             })
             ->requiresConfirmation()
             ->modalHeading('Passer à : '.$next->label())
-            ->modalDescription('Seules les transitions logiques du parcours colis sont autorisées.')
-            ->form([
-                Textarea::make('note')
+            ->modalDescription(
+                $next === ParcelStatusEnum::Collected
+                    ? 'Si un paiement confiant est lié, saisissez le code de collecte pour débloquer les fonds. Ne communiquez pas ce code au commerçant.'
+                    : 'Seules les transitions logiques du parcours colis sont autorisées.'
+            )
+            ->form(function (ParcelShipment $record) use ($next): array {
+                $fields = [];
+                if ($next === ParcelStatusEnum::Collected && self::needsEscrowUnlock($record)) {
+                    $fields[] = TextInput::make('pickup_code')
+                        ->label('Code collecte')
+                        ->helperText('Code de déblocage du paiement confiant (pas l’identifiant).')
+                        ->required()
+                        ->maxLength(12);
+                }
+                $fields[] = Textarea::make('note')
                     ->label('Note (optionnel)')
                     ->rows(2)
-                    ->maxLength(255),
-            ])
+                    ->maxLength(255);
+
+                return $fields;
+            })
             ->action(function (ParcelShipment $record, array $data) use ($next): void {
                 try {
                     app(ParcelShipmentService::class)->transition(
@@ -151,6 +168,7 @@ class ParcelShipmentStatusActions
                         $data['note'] ?? null,
                         'admin',
                         auth()->id(),
+                        isset($data['pickup_code']) ? (string) $data['pickup_code'] : null,
                     );
 
                     Notification::make()
@@ -170,6 +188,25 @@ class ParcelShipmentStatusActions
             });
     }
 
+    public static function needsEscrowUnlock(ParcelShipment $shipment): bool
+    {
+        $shipment->loadMissing('trustedPayment');
+        $escrow = $shipment->trustedPayment;
+        if (! $escrow) {
+            return false;
+        }
+
+        $status = $escrow->status instanceof TrustedPaymentStatusEnum
+            ? $escrow->status
+            : TrustedPaymentStatusEnum::tryFrom((string) $escrow->status);
+
+        return in_array($status, [
+            TrustedPaymentStatusEnum::FundsHeld,
+            TrustedPaymentStatusEnum::ExpeditionRequested,
+            TrustedPaymentStatusEnum::CourierEnRoute,
+        ], true);
+    }
+
     protected static function statusOf(ParcelShipment $shipment): ?ParcelStatusEnum
     {
         return $shipment->status instanceof ParcelStatusEnum
@@ -182,5 +219,12 @@ class ParcelShipmentStatusActions
         return $shipment->delivery_mode instanceof ParcelDeliveryModeEnum
             ? $shipment->delivery_mode
             : ParcelDeliveryModeEnum::tryFrom((string) $shipment->delivery_mode);
+    }
+
+    protected static function userCanManage(): bool
+    {
+        $user = Auth::user();
+
+        return $user instanceof User && $user->hasPermission('parcels.manage');
     }
 }

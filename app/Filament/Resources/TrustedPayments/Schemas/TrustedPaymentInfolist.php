@@ -17,6 +17,9 @@ class TrustedPaymentInfolist
                     ->columns(3)
                     ->schema([
                         TextEntry::make('reference')->label('Référence'),
+                        TextEntry::make('parcelShipment.reference')
+                            ->label('Colis lié')
+                            ->placeholder('—'),
                         TextEntry::make('status')->label('Statut')->badge(),
                         TextEntry::make('payout_status')->label('Versement')->badge(),
                         TextEntry::make('product_description')->label('Produit')->columnSpanFull(),

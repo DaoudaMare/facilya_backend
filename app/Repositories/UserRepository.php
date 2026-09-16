@@ -27,7 +27,10 @@ class UserRepository extends BaseRepository implements UserRepositoryInterface
 
     public function findByPhone(string $phone): ?User
     {
-        return $this->query()->where('phone', $phone)->first();
+        return $this->query()
+            ->where('phone', $phone)
+            ->orWhere('phone_secondary', $phone)
+            ->first();
     }
 
     public function findByEmail(string $email): ?User

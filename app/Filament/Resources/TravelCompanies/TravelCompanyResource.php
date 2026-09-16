@@ -9,15 +9,19 @@ use App\Filament\Resources\TravelCompanies\Pages\ViewTravelCompany;
 use App\Filament\Resources\TravelCompanies\Schemas\TravelCompanyForm;
 use App\Filament\Resources\TravelCompanies\Schemas\TravelCompanyInfolist;
 use App\Filament\Resources\TravelCompanies\Tables\TravelCompaniesTable;
+use App\Filament\Support\AuthorizesPermissions;
 use App\Models\TravelCompany;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class TravelCompanyResource extends Resource
 {
+    use AuthorizesPermissions;
+
     protected static ?string $model = TravelCompany::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingOffice2;
@@ -64,5 +68,30 @@ class TravelCompanyResource extends Resource
             'view' => ViewTravelCompany::route('/{record}'),
             'edit' => EditTravelCompany::route('/{record}/edit'),
         ];
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccessManage('travel.manage');
+    }
+
+    public static function canView(Model $record): bool
+    {
+        return static::canAccessManage('travel.manage');
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canAccessManage('travel.manage');
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canAccessManage('travel.manage');
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canAccessManage('travel.manage');
     }
 }

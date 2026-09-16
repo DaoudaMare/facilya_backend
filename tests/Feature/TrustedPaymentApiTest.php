@@ -12,6 +12,7 @@ use App\Services\TransactionService;
 use App\Services\TrustedPaymentService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -49,6 +50,7 @@ class TrustedPaymentApiTest extends TestCase
         $this->assertEquals(10200, $quote->json('data.total_amount'));
         $this->assertEquals(10000, $quote->json('data.payout_amount'));
 
+        Notification::fake();
         Sanctum::actingAs($buyer);
 
         $this->getJson('/api/v1/trusted-payments/merchant-lookup?phone=0722222255')
@@ -79,6 +81,18 @@ class TrustedPaymentApiTest extends TestCase
         $payment->refresh();
         $this->assertSame(TrustedPaymentStatusEnum::FundsHeld, $payment->status);
         $this->assertNotNull($payment->funds_held_at);
+
+        Notification::assertSentTo(
+            $merchant,
+            \App\Notifications\MerchantFundsHeldNotification::class,
+            function (\App\Notifications\MerchantFundsHeldNotification $notification) use ($payment): bool {
+                $sms = $notification->toSms($notification->payment->merchant);
+                $this->assertStringContainsString($payment->reference, $sms);
+                $this->assertStringContainsString('Identifiant', $sms);
+
+                return true;
+            },
+        );
 
         Sanctum::actingAs($merchant);
         $this->postJson('/api/v1/trusted-payments/'.$uuid.'/expedition', [

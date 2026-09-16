@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Filament\Resources\Transactions\TransactionResource;
+use App\Filament\Support\AuthorizesPermissions;
 use App\Models\Transaction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
@@ -11,11 +12,18 @@ use Filament\Widgets\TableWidget;
 
 class LatestTransactionsWidget extends TableWidget
 {
+    use AuthorizesPermissions;
+
     protected static ?string $heading = 'Dernières transactions';
 
     protected static ?int $sort = 2;
 
     protected int|string|array $columnSpan = 'full';
+
+    public static function canView(): bool
+    {
+        return static::userHasPermission('transactions.view', 'transactions.manage');
+    }
 
     public function table(Table $table): Table
     {

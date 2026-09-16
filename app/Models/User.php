@@ -23,13 +23,19 @@ class User extends Authenticatable implements FilamentUser
      */
     protected $fillable = [
         'name',
+        'first_name',
+        'last_name',
         'email',
         'phone',
+        'phone_secondary',
+        'cnib_number',
+        'cnib_photo',
         'password',
         'pin',
         'referral_code',
         'referred_by_user_id',
         'reward_balance',
+        'role_id',
     ];
 
     /**
@@ -59,6 +65,68 @@ class User extends Authenticatable implements FilamentUser
         return filled($this->pin);
     }
 
+    public function addresses(): HasMany
+    {
+        return $this->hasMany(UserAddress::class);
+    }
+
+    public function publicEmail(): ?string
+    {
+        $email = (string) $this->email;
+
+        if ($email === '' || str_ends_with($email, '@users.facilya.local')) {
+            return null;
+        }
+
+        return $email;
+    }
+
+    public function isEmailAccount(): bool
+    {
+        return filled($this->publicEmail());
+    }
+
+    public function hasRealName(): bool
+    {
+        return filled($this->first_name) && filled($this->last_name);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function profileMissing(): array
+    {
+        $missing = [];
+
+        if (! $this->hasRealName()) {
+            $missing[] = 'name';
+        }
+
+        if ($this->isEmailAccount() && blank($this->phone)) {
+            $missing[] = 'phone';
+        }
+
+        if ($this->addresses->isEmpty()) {
+            $missing[] = 'pickup_address';
+        }
+
+        return $missing;
+    }
+
+    public function isProfileComplete(): bool
+    {
+        return $this->profileMissing() === [];
+    }
+
+    public function cnibPhotoUrl(): ?string
+    {
+        if (! filled($this->cnib_photo)) {
+            return null;
+        }
+
+        return asset('storage/'.$this->cnib_photo);
+    }
+
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
@@ -84,8 +152,33 @@ class User extends Authenticatable implements FilamentUser
         return $this->hasMany(RewardLedger::class);
     }
 
+    public function role(): BelongsTo
+    {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function hasPermission(string $slug): bool
+    {
+        $this->loadMissing('role.permissions');
+
+        return (bool) $this->role?->hasPermission($slug);
+    }
+
+    public function hasAnyPermission(string ...$slugs): bool
+    {
+        foreach ($slugs as $slug) {
+            if ($this->hasPermission($slug)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function canAccessPanel(Panel $panel): bool
     {
-        return true;
+        $this->loadMissing('role');
+
+        return (bool) $this->role?->can_access_panel;
     }
 }

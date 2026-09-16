@@ -6,6 +6,7 @@ use App\Filament\Resources\TrustedPayments\Pages\ListTrustedPayments;
 use App\Filament\Resources\TrustedPayments\Pages\ViewTrustedPayment;
 use App\Filament\Resources\TrustedPayments\Schemas\TrustedPaymentInfolist;
 use App\Filament\Resources\TrustedPayments\Tables\TrustedPaymentsTable;
+use App\Filament\Support\AuthorizesPermissions;
 use App\Models\TrustedPayment;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -13,9 +14,12 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 class TrustedPaymentResource extends Resource
 {
+    use AuthorizesPermissions;
+
     protected static ?string $model = TrustedPayment::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedShieldCheck;
@@ -53,6 +57,31 @@ class TrustedPaymentResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
-            ->with(['buyer', 'merchant', 'transaction.paymentNetwork', 'paymentNetwork', 'payoutNetwork', 'events']);
+            ->with(['buyer', 'merchant', 'transaction.paymentNetwork', 'paymentNetwork', 'payoutNetwork', 'parcelShipment', 'events']);
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccessView('trusted_payments.view', 'trusted_payments.manage');
+    }
+
+    public static function canView(Model $record): bool
+    {
+        return static::canAccessView('trusted_payments.view', 'trusted_payments.manage');
+    }
+
+    public static function canCreate(): bool
+    {
+        return false;
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canAccessManage('trusted_payments.manage');
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canAccessManage('trusted_payments.manage');
     }
 }

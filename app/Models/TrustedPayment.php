@@ -7,6 +7,7 @@ use App\Data\TrustedPayoutStatusEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -101,5 +102,10 @@ class TrustedPayment extends Model
     public function events(): HasMany
     {
         return $this->hasMany(TrustedPaymentEvent::class)->latest('id');
+    }
+
+    public function parcelShipment(): HasOne
+    {
+        return $this->hasOne(ParcelShipment::class);
     }
 }

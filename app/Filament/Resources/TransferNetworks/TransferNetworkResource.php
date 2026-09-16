@@ -7,15 +7,19 @@ use App\Filament\Resources\TransferNetworks\Pages\EditTransferNetwork;
 use App\Filament\Resources\TransferNetworks\Pages\ListTransferNetworks;
 use App\Filament\Resources\TransferNetworks\Schemas\TransferNetworkForm;
 use App\Filament\Resources\TransferNetworks\Tables\TransferNetworksTable;
+use App\Filament\Support\AuthorizesPermissions;
 use App\Models\TransferNetwork;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class TransferNetworkResource extends Resource
 {
+    use AuthorizesPermissions;
+
     protected static ?string $model = TransferNetwork::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowsRightLeft;
@@ -56,5 +60,25 @@ class TransferNetworkResource extends Resource
             'create' => CreateTransferNetwork::route('/create'),
             'edit' => EditTransferNetwork::route('/{record}/edit'),
         ];
+    }
+
+    public static function canViewAny(): bool
+    {
+        return static::canAccessManage('networks.manage');
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canAccessManage('networks.manage');
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canAccessManage('networks.manage');
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canAccessManage('networks.manage');
     }
 }

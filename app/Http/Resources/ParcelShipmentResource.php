@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Data\ParcelDeliveryModeEnum;
+use App\Data\ParcelScopeEnum;
 use App\Data\ParcelStatusEnum;
 use App\Models\ParcelShipment;
 use App\Support\Phone;
@@ -27,21 +28,27 @@ class ParcelShipmentResource extends JsonResource
             ? $this->status
             : ParcelStatusEnum::tryFrom((string) $this->status);
 
+        $scope = $this->scope instanceof ParcelScopeEnum
+            ? $this->scope
+            : ParcelScopeEnum::tryFrom((string) ($this->scope ?? ParcelScopeEnum::Intercity->value));
+
         return [
             'id' => $this->id,
             'uuid' => $this->uuid,
             'reference' => $this->reference,
+            'scope' => $scope?->value ?? ParcelScopeEnum::Intercity->value,
+            'scope_label' => $scope?->label() ?? ParcelScopeEnum::Intercity->label(),
             'delivery_mode' => $mode?->value,
             'delivery_mode_label' => $mode?->label(),
             'status' => $status?->value,
             'status_label' => $status?->label(),
             'tracking_label' => $status?->trackingLabel(),
             'tracking_steps' => $status && $mode
-                ? $status->trackingTimeline($mode)
+                ? $status->trackingTimeline($mode, $scope ?? ParcelScopeEnum::Intercity)
                 : [],
             'corridor' => $this->corridorLabel(),
-            'departure' => $this->route?->departure,
-            'arrival' => $this->route?->arrival,
+            'departure' => $this->origin_city ?: $this->route?->departure,
+            'arrival' => $this->destination_city ?: $this->route?->arrival,
             'company' => $this->travelCompany?->name ?? $this->route?->travelCompany?->name,
             'sender' => [
                 'name' => $this->sender_name,
@@ -60,6 +67,7 @@ class ParcelShipmentResource extends JsonResource
                 'district' => $this->recipient_district,
             ],
             'parcel_description' => $this->parcel_description,
+            'parcel_photo_url' => $this->cnibUrl($this->parcel_photo),
             'estimated_weight_kg' => $this->estimated_weight_kg !== null ? (float) $this->estimated_weight_kg : null,
             'declared_value' => $this->declared_value !== null ? (float) $this->declared_value : null,
             'pricing' => [
@@ -91,6 +99,16 @@ class ParcelShipmentResource extends JsonResource
                 'created_at' => $this->created_at?->toIso8601String(),
             ],
             'transaction' => TransactionResource::make($this->whenLoaded('transaction')),
+            'trusted_payment' => $this->when(
+                $this->relationLoaded('trustedPayment') && $this->trustedPayment,
+                fn () => [
+                    'uuid' => $this->trustedPayment->uuid,
+                    'reference' => $this->trustedPayment->reference,
+                    'status' => $this->trustedPayment->status instanceof \App\Data\TrustedPaymentStatusEnum
+                        ? $this->trustedPayment->status->value
+                        : $this->trustedPayment->status,
+                ],
+            ),
             'events' => $this->whenLoaded('events', function () {
                 return $this->events->map(function ($event) {
                     $status = $event->status instanceof ParcelStatusEnum

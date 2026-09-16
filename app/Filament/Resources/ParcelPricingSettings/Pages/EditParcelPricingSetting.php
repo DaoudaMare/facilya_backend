@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\ParcelPricingSettings\Pages;
 
 use App\Filament\Resources\ParcelPricingSettings\ParcelPricingSettingResource;
-use App\Models\ParcelPricingSetting;
 use Filament\Resources\Pages\EditRecord;
 
 class EditParcelPricingSetting extends EditRecord
@@ -14,8 +13,7 @@ class EditParcelPricingSetting extends EditRecord
 
     public function mount(int|string|null $record = null): void
     {
-        $settings = ParcelPricingSetting::current();
-        parent::mount($settings->getKey());
+        $this->redirect(\App\Filament\Pages\Configuration::tabUrl('tarifs-colis'), navigate: false);
     }
 
     protected function getRedirectUrl(): ?string

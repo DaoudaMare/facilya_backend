@@ -70,7 +70,7 @@ class ParcelPricingSettingForm
                             ->numeric()
                             ->minValue(0)
                             ->required()
-                            ->helperText('Frais auto collecte = distance_km × ce tarif. Mettre 0 pour désactiver.')
+                            ->helperText('Frais auto collecte = distance Mapbox (lien Google Maps → agence/ville) × ce tarif. Mettre 0 pour désactiver.')
                             ->columnSpanFull(),
                     ]),
                 Section::make('Livraison à domicile (drop-off)')

@@ -124,8 +124,8 @@ enum TrustedPaymentStatusEnum: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::PendingPayment => [self::FundsHeld, self::Cancelled, self::Failed],
-            self::FundsHeld => [self::ExpeditionRequested, self::Cancelled, self::Failed],
-            self::ExpeditionRequested => [self::CourierEnRoute, self::Cancelled, self::Failed],
+            self::FundsHeld => [self::ExpeditionRequested, self::Collected, self::Cancelled, self::Failed],
+            self::ExpeditionRequested => [self::CourierEnRoute, self::Collected, self::Cancelled, self::Failed],
             self::CourierEnRoute => [self::Collected, self::Cancelled, self::Failed],
             self::Collected => [self::InTransit, self::Failed],
             self::InTransit => [self::Arrived, self::Failed],

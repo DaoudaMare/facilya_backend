@@ -5,11 +5,13 @@ namespace App\Filament\Resources\TrustedPayments\Support;
 use App\Data\TrustedPaymentStatusEnum;
 use App\Data\TrustedPayoutStatusEnum;
 use App\Models\TrustedPayment;
+use App\Models\User;
 use App\Services\TrustedPaymentService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class TrustedPaymentStatusActions
@@ -19,6 +21,10 @@ class TrustedPaymentStatusActions
      */
     public static function headerActionsFor(TrustedPayment $payment): array
     {
+        if (! self::userCanManage()) {
+            return [];
+        }
+
         $actions = array_map(
             fn (TrustedPaymentStatusEnum $next) => self::makeTransitionAction($next, highlight: self::isPrimaryNext($payment, $next)),
             self::allowedStatuses($payment),
@@ -36,20 +42,20 @@ class TrustedPaymentStatusActions
         $actions = array_map(
             function (TrustedPaymentStatusEnum $next) {
                 return self::makeTransitionAction($next, highlight: false)
-                    ->visible(fn (TrustedPayment $record): bool => self::isAllowed($record, $next));
+                    ->visible(fn (TrustedPayment $record): bool => self::userCanManage() && self::isAllowed($record, $next));
             },
             self::allTransitionTargets(),
         );
 
         $actions[] = self::makeRetryPayoutAction()
-            ->visible(fn (TrustedPayment $record): bool => self::canRetryPayout($record));
+            ->visible(fn (TrustedPayment $record): bool => self::userCanManage() && self::canRetryPayout($record));
 
         return ActionGroup::make($actions)
             ->label('Statut')
             ->icon('heroicon-o-arrow-path')
             ->button()
             ->color('primary')
-            ->visible(fn (TrustedPayment $record): bool => self::canAdvance($record) || self::canRetryPayout($record));
+            ->visible(fn (TrustedPayment $record): bool => self::userCanManage() && (self::canAdvance($record) || self::canRetryPayout($record)));
     }
 
     public static function nextStepHint(TrustedPayment $payment): ?string
@@ -219,5 +225,12 @@ class TrustedPaymentStatusActions
         return $payment->status instanceof TrustedPaymentStatusEnum
             ? $payment->status
             : TrustedPaymentStatusEnum::tryFrom((string) $payment->status);
+    }
+
+    protected static function userCanManage(): bool
+    {
+        $user = Auth::user();
+
+        return $user instanceof User && $user->hasPermission('trusted_payments.manage');
     }
 }

@@ -2,7 +2,6 @@
 
 namespace App\Channels;
 
-use App\Notifications\OtpCodeNotification;
 use App\Services\ZapwiseWhatsAppService;
 use Illuminate\Notifications\Notification;
 
@@ -14,7 +13,7 @@ class WhatsAppChannel
 
     public function send(object $notifiable, Notification $notification): void
     {
-        if (! $notification instanceof OtpCodeNotification) {
+        if (! method_exists($notification, 'toWhatsApp')) {
             return;
         }
 

@@ -5,17 +5,23 @@ namespace App\Services;
 use App\Data\ParcelDeliveryModeEnum;
 use App\Data\ParcelFeeModeEnum;
 use App\Data\ParcelQuote;
+use App\Data\ParcelScopeEnum;
 use App\Data\ParcelStatusEnum;
 use App\Data\TransactionTypeEnum;
+use App\Data\TrustedPaymentStatusEnum;
 use App\Models\ParcelEvent;
 use App\Models\ParcelPricingSetting;
 use App\Models\ParcelShipment;
 use App\Models\Transaction;
 use App\Models\TravelCompanyRoute;
+use App\Models\TravelCompanyStation;
 use App\Models\User;
+use App\Support\GoogleMapsLink;
 use App\Support\Phone;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -24,24 +30,35 @@ class ParcelShipmentService
     public function __construct(
         protected FeeQuoteService $feeQuotes,
         protected TransactionService $transactions,
+        protected MapDirectionService $mapDirections,
     ) {}
 
     public function quote(
-        int $routeId,
+        ?int $routeId,
         ParcelDeliveryModeEnum $mode,
         ?int $paymentNetworkId = null,
-        ?float $pickupDistanceKm = null,
         ?float $deliveryDistanceKm = null,
         ?float $declaredValue = null,
+        ParcelScopeEnum $scope = ParcelScopeEnum::Intercity,
+        ?string $pickupAddress = null,
+        ?string $originCity = null,
     ): ParcelQuote {
-        $route = $this->assertActiveRoute($routeId);
-        $settings = ParcelPricingSetting::current();
+        if ($scope === ParcelScopeEnum::Local) {
+            $mode = ParcelDeliveryModeEnum::DoorDelivery;
+        }
 
-        $agency = $this->computeAmount(
-            $settings->agency_mode,
-            (string) $settings->agency_value,
-            $this->routeReferenceAmount($route),
-        );
+        $settings = ParcelPricingSetting::current();
+        $route = $scope === ParcelScopeEnum::Intercity
+            ? $this->assertActiveRoute((int) $routeId)
+            : null;
+
+        $agency = $scope === ParcelScopeEnum::Local
+            ? '0.00'
+            : $this->computeAmount(
+                $settings->agency_mode,
+                (string) $settings->agency_value,
+                $this->routeReferenceAmount($route),
+            );
 
         $margin = $this->computeAmount(
             $settings->margin_mode,
@@ -63,6 +80,13 @@ class ParcelShipmentService
 
         $pickupPerKm = number_format((float) $settings->pickup_per_km, 4, '.', '');
         $deliveryPerKm = number_format((float) $settings->delivery_per_km, 4, '.', '');
+
+        $pickupDistanceKm = $this->resolvePickupDistanceKm(
+            $pickupAddress,
+            $route,
+            $scope,
+            $originCity,
+        );
 
         $this->assertDistances($settings, $mode, $pickupDistanceKm, $deliveryDistanceKm);
 
@@ -130,15 +154,36 @@ class ParcelShipmentService
      */
     public function place(User $user, array $attributes): ParcelShipment
     {
+        $scope = ($attributes['scope'] ?? null) instanceof ParcelScopeEnum
+            ? $attributes['scope']
+            : ParcelScopeEnum::from((string) ($attributes['scope'] ?? ParcelScopeEnum::Intercity->value));
+
         $mode = $attributes['delivery_mode'] instanceof ParcelDeliveryModeEnum
             ? $attributes['delivery_mode']
-            : ParcelDeliveryModeEnum::from((string) $attributes['delivery_mode']);
+            : ParcelDeliveryModeEnum::from((string) ($attributes['delivery_mode'] ?? ParcelDeliveryModeEnum::DoorDelivery->value));
 
-        $route = $this->assertActiveRoute((int) $attributes['travel_company_route_id']);
-        $paymentNetworkId = (int) $attributes['payment_network_id'];
+        if ($scope === ParcelScopeEnum::Local) {
+            $mode = ParcelDeliveryModeEnum::DoorDelivery;
+        }
 
-        $this->transactions->assertReceivesPayments($paymentNetworkId, 'payment_network_id');
+        $route = $scope === ParcelScopeEnum::Intercity
+            ? $this->assertActiveRoute((int) $attributes['travel_company_route_id'])
+            : null;
 
+        $originCity = trim((string) ($attributes['origin_city'] ?? ''));
+        $destinationCity = trim((string) ($attributes['destination_city'] ?? $originCity));
+
+        if ($scope === ParcelScopeEnum::Local) {
+            if ($originCity === '') {
+                throw ValidationException::withMessages([
+                    'origin_city' => 'La ville de livraison locale est obligatoire.',
+                ]);
+            }
+            $destinationCity = $originCity;
+        } else {
+            $originCity = $originCity !== '' ? $originCity : (string) $route->departure;
+            $destinationCity = $destinationCity !== '' ? $destinationCity : (string) $route->arrival;
+        }
         $senderPhone = Phone::normalize((string) $attributes['sender_phone']);
         $recipientPhone = Phone::normalize((string) $attributes['recipient_phone']);
 
@@ -153,19 +198,47 @@ class ParcelShipmentService
             throw ValidationException::withMessages($phoneErrors);
         }
 
-        if (blank($attributes['pickup_address'] ?? null)) {
+        $pickupAddress = GoogleMapsLink::normalize((string) ($attributes['pickup_address'] ?? ''));
+        
+        if ($pickupAddress === '') {
             throw ValidationException::withMessages([
-                'pickup_address' => 'L’adresse de collecte (pickup) est obligatoire.',
+                'pickup_address' => 'Le lien Google Maps de collecte est obligatoire.',
             ]);
         }
-
-        if ($mode === ParcelDeliveryModeEnum::DoorDelivery && blank($attributes['recipient_address'] ?? null)) {
+        if (! GoogleMapsLink::isValid($pickupAddress)) {
             throw ValidationException::withMessages([
-                'recipient_address' => 'L’adresse de livraison (drop-off) est obligatoire pour une livraison à domicile.',
+                'pickup_address' => GoogleMapsLink::validationMessage(),
             ]);
+        }
+        $attributes['pickup_address'] = $pickupAddress;
+
+        if ($mode === ParcelDeliveryModeEnum::DoorDelivery) {
+            $recipientAddress = GoogleMapsLink::normalize((string) ($attributes['recipient_address'] ?? ''));
+            if ($recipientAddress === '') {
+                throw ValidationException::withMessages([
+                    'recipient_address' => 'Le lien Google Maps de livraison est obligatoire pour une livraison à domicile.',
+                ]);
+            }
+            if (! GoogleMapsLink::isValid($recipientAddress)) {
+                throw ValidationException::withMessages([
+                    'recipient_address' => GoogleMapsLink::validationMessage(),
+                ]);
+            }
+            $attributes['recipient_address'] = $recipientAddress;
+        } elseif (filled($attributes['recipient_address'] ?? null)) {
+            $recipientAddress = GoogleMapsLink::normalize((string) $attributes['recipient_address']);
+            if (! GoogleMapsLink::isValid($recipientAddress)) {
+                throw ValidationException::withMessages([
+                    'recipient_address' => GoogleMapsLink::validationMessage(),
+                ]);
+            }
+            $attributes['recipient_address'] = $recipientAddress;
         }
 
         $senderCnib = trim((string) ($attributes['sender_cnib_number'] ?? ''));
+        if ($senderCnib === '') {
+            $senderCnib = trim((string) ($user->cnib_number ?? ''));
+        }
         $recipientCnib = trim((string) ($attributes['recipient_cnib_number'] ?? ''));
         $cnibErrors = [];
         if ($senderCnib === '') {
@@ -178,13 +251,18 @@ class ParcelShipmentService
             throw ValidationException::withMessages($cnibErrors);
         }
 
-        $senderPhoto = $this->storeCnibPhoto($attributes['sender_cnib_photo'] ?? null, 'sender');
+        $senderPhoto = $this->storeCnibPhoto(
+            $attributes['sender_cnib_photo'] ?? null,
+            'sender',
+            $user->cnib_photo,
+        );
         $recipientPhoto = $this->storeCnibPhoto($attributes['recipient_cnib_photo'] ?? null, 'recipient');
+        $parcelPhoto = $this->storeParcelPhoto($attributes['parcel_photo'] ?? null);
 
-        $pickupKm = isset($attributes['pickup_distance_km']) ? (float) $attributes['pickup_distance_km'] : null;
         $deliveryKm = isset($attributes['delivery_distance_km']) ? (float) $attributes['delivery_distance_km'] : null;
         $declaredValue = isset($attributes['declared_value']) ? (float) $attributes['declared_value'] : null;
         $description = trim((string) ($attributes['parcel_description'] ?? ''));
+        $weightKg = isset($attributes['estimated_weight_kg']) ? (float) $attributes['estimated_weight_kg'] : null;
 
         if ($description === '') {
             throw ValidationException::withMessages([
@@ -198,34 +276,61 @@ class ParcelShipmentService
             ]);
         }
 
+        if ($weightKg === null || $weightKg <= 0) {
+            throw ValidationException::withMessages([
+                'estimated_weight_kg' => 'Le poids du colis est obligatoire.',
+            ]);
+        }
+
+        $trustedUuid = trim((string) ($attributes['trusted_payment_uuid'] ?? ''));
+        $trustedPayment = null;
+        if ($trustedUuid !== '') {
+            $trustedPayment = app(TrustedPaymentService::class)->findLinkableForBuyer((int) $user->id, $trustedUuid);
+            $paymentNetworkId = (int) $trustedPayment->payment_network_id;
+        } else {
+            $paymentNetworkId = (int) ($attributes['payment_network_id'] ?? 0);
+        }
+
+        $this->transactions->assertReceivesPayments($paymentNetworkId, 'payment_network_id');
+
         $quote = $this->quote(
-            $route->id,
+            $route?->id,
             $mode,
             $paymentNetworkId,
-            $pickupKm,
             $deliveryKm,
             $declaredValue,
+            $scope,
+            $attributes['pickup_address'] ?? null,
+            $originCity,
         );
 
         return DB::transaction(function () use (
             $user,
             $attributes,
             $mode,
+            $scope,
             $route,
+            $originCity,
+            $destinationCity,
             $paymentNetworkId,
             $senderPhone,
             $recipientPhone,
             $quote,
-            $pickupKm,
             $deliveryKm,
             $senderCnib,
             $recipientCnib,
             $senderPhoto,
             $recipientPhoto,
+            $parcelPhoto,
             $declaredValue,
             $description,
+            $weightKg,
+            $trustedPayment,
         ) {
             $reference = $this->generateReference();
+            $corridorLabel = $scope === ParcelScopeEnum::Local
+                ? $originCity.' (local)'
+                : $originCity.' → '.$destinationCity;
 
             $transaction = $this->transactions->createParcelShipment([
                 'user_id' => $user->id,
@@ -233,11 +338,11 @@ class ParcelShipmentService
                 'network_fee' => $quote->networkFee,
                 'platform_fee' => $quote->platformFee,
                 'payment_network_id' => $paymentNetworkId,
-                'travel_company_route_id' => $route->id,
+                'travel_company_route_id' => $route?->id,
                 'sender_phone' => $senderPhone,
                 'recipient_phone' => $recipientPhone,
                 'recipient_name' => $attributes['recipient_name'],
-                'description' => sprintf('Colis %s (%s)', $route->departure.' → '.$route->arrival, $mode->label()),
+                'description' => sprintf('Colis %s (%s)', $corridorLabel, $mode->label()),
                 'payment_expires_at' => now()->addMinutes(30),
                 'reference' => $reference,
             ]);
@@ -246,8 +351,11 @@ class ParcelShipmentService
                 'reference' => $reference,
                 'user_id' => $user->id,
                 'transaction_id' => $transaction->id,
-                'travel_company_id' => $route->travel_company_id,
-                'travel_company_route_id' => $route->id,
+                'travel_company_id' => $route?->travel_company_id,
+                'travel_company_route_id' => $route?->id,
+                'scope' => $scope,
+                'origin_city' => $originCity,
+                'destination_city' => $destinationCity,
                 'delivery_mode' => $mode,
                 'status' => ParcelStatusEnum::PendingPayment,
                 'sender_name' => $attributes['sender_name'] ?? $user->name,
@@ -265,14 +373,15 @@ class ParcelShipmentService
                     : null,
                 'recipient_district' => $attributes['recipient_district'] ?? null,
                 'parcel_description' => $description,
-                'estimated_weight_kg' => $attributes['estimated_weight_kg'] ?? null,
+                'parcel_photo' => $parcelPhoto,
+                'estimated_weight_kg' => $weightKg,
                 'declared_value' => $declaredValue,
                 'agency_fee' => $quote->agencyFee,
                 'margin_amount' => $quote->marginAmount,
                 'value_fee' => $quote->valueFee,
                 'base_amount' => $quote->baseAmount,
                 'pickup_fee' => $quote->pickupFee,
-                'pickup_distance_km' => $pickupKm,
+                'pickup_distance_km' => $quote->pickupDistanceKm,
                 'pickup_distance_fee' => $quote->pickupDistanceFee,
                 'delivery_fee' => $quote->deliveryFee,
                 'delivery_distance_km' => $mode === ParcelDeliveryModeEnum::DoorDelivery ? $deliveryKm : null,
@@ -287,14 +396,31 @@ class ParcelShipmentService
 
             $this->recordEvent($shipment, ParcelStatusEnum::PendingPayment, 'Commande créée, en attente de paiement.', 'system');
 
-            return $shipment->load(['route.travelCompany', 'transaction.paymentNetwork', 'events']);
+            if ($trustedPayment) {
+                $shipment->trusted_payment_id = $trustedPayment->id;
+                $shipment->save();
+
+                $this->transactions->markPaymentReceived($transaction, $trustedPayment->reference);
+                $this->confirmAfterPayment($transaction->fresh() ?? $transaction);
+                app(TrustedPaymentService::class)->onLinkedToParcel(
+                    $trustedPayment->fresh() ?? $trustedPayment,
+                    $shipment->fresh() ?? $shipment,
+                );
+            }
+
+            return ($shipment->fresh([
+                'route.travelCompany',
+                'transaction.paymentNetwork',
+                'trustedPayment',
+                'events',
+            ]) ?? $shipment);
         });
     }
 
     public function listForUser(int $userId): Collection
     {
         return ParcelShipment::query()
-            ->with(['route.travelCompany', 'transaction.paymentNetwork'])
+            ->with(['route.travelCompany', 'transaction.paymentNetwork', 'trustedPayment'])
             ->where('user_id', $userId)
             ->latest('id')
             ->get();
@@ -303,7 +429,7 @@ class ParcelShipmentService
     public function findForUser(int $userId, string $uuid): ?ParcelShipment
     {
         return ParcelShipment::query()
-            ->with(['route.travelCompany', 'transaction.paymentNetwork', 'events'])
+            ->with(['route.travelCompany', 'transaction.paymentNetwork', 'trustedPayment', 'events'])
             ->where('user_id', $userId)
             ->where('uuid', $uuid)
             ->first();
@@ -332,6 +458,7 @@ class ParcelShipmentService
         ?string $note = null,
         string $actorType = 'admin',
         ?int $actorUserId = null,
+        ?string $pickupCode = null,
     ): ParcelShipment {
         $current = $shipment->status instanceof ParcelStatusEnum
             ? $shipment->status
@@ -341,13 +468,17 @@ class ParcelShipmentService
             ? $shipment->delivery_mode
             : ParcelDeliveryModeEnum::from((string) $shipment->delivery_mode);
 
+        $scope = $shipment->scope instanceof ParcelScopeEnum
+            ? $shipment->scope
+            : ParcelScopeEnum::from((string) ($shipment->scope ?? ParcelScopeEnum::Intercity->value));
+
         if ($current->isFinal()) {
             throw ValidationException::withMessages([
                 'status' => 'Cet envoi est déjà terminé.',
             ]);
         }
 
-        if (! in_array($next, $current->allowedNext($mode), true)) {
+        if (! in_array($next, $current->allowedNext($mode, $scope), true)) {
             throw ValidationException::withMessages([
                 'status' => sprintf(
                     'Transition invalide : %s → %s.',
@@ -355,6 +486,10 @@ class ParcelShipmentService
                     $next->label(),
                 ),
             ]);
+        }
+
+        if ($next === ParcelStatusEnum::Collected) {
+            $this->assertEscrowUnlockCode($shipment, $pickupCode);
         }
 
         $shipment->status = $next;
@@ -370,6 +505,16 @@ class ParcelShipmentService
         $shipment->save();
 
         $this->recordEvent($shipment, $next, $note, $actorType, $actorUserId);
+
+        if ($next === ParcelStatusEnum::Collected) {
+            $shipment->loadMissing('trustedPayment');
+            if ($shipment->trustedPayment) {
+                app(TrustedPaymentService::class)->releaseOnParcelCollected(
+                    $shipment->trustedPayment,
+                    $shipment,
+                );
+            }
+        }
 
         if (in_array($next, [ParcelStatusEnum::Delivered, ParcelStatusEnum::PickedUp], true) && $shipment->transaction_id) {
             $tx = Transaction::query()->find($shipment->transaction_id);
@@ -392,7 +537,36 @@ class ParcelShipmentService
             }
         }
 
-        return $shipment->fresh(['route.travelCompany', 'transaction.paymentNetwork', 'events']) ?? $shipment;
+        return $shipment->fresh(['route.travelCompany', 'transaction.paymentNetwork', 'trustedPayment', 'events']) ?? $shipment;
+    }
+
+    protected function assertEscrowUnlockCode(ParcelShipment $shipment, ?string $pickupCode): void
+    {
+        $shipment->loadMissing('trustedPayment');
+        $escrow = $shipment->trustedPayment;
+        if (! $escrow) {
+            return;
+        }
+
+        $status = $escrow->status instanceof TrustedPaymentStatusEnum
+            ? $escrow->status
+            : TrustedPaymentStatusEnum::tryFrom((string) $escrow->status);
+
+        if (! in_array($status, [
+            TrustedPaymentStatusEnum::FundsHeld,
+            TrustedPaymentStatusEnum::ExpeditionRequested,
+            TrustedPaymentStatusEnum::CourierEnRoute,
+        ], true)) {
+            return;
+        }
+
+        $expected = (string) $shipment->pickup_code;
+        $given = trim((string) $pickupCode);
+        if ($expected === '' || $given === '' || ! hash_equals($expected, $given)) {
+            throw ValidationException::withMessages([
+                'pickup_code' => 'Le code de collecte est obligatoire pour débloquer le paiement confiant.',
+            ]);
+        }
     }
 
     protected function computeAmount(ParcelFeeModeEnum|string $mode, string $value, string $reference): string
@@ -432,8 +606,8 @@ class ParcelShipmentService
     ): void {
         $errors = [];
 
-        if ((float) $settings->pickup_per_km > 0 && ($pickupDistanceKm === null || $pickupDistanceKm <= 0)) {
-            $errors['pickup_distance_km'] = 'La distance de collecte (km) est obligatoire pour calculer les frais au km.';
+        if ((float) $settings->pickup_per_km > 0 && $pickupDistanceKm === null) {
+            $errors['pickup_address'] = 'Le lien Google Maps de collecte est obligatoire pour calculer les frais au km.';
         }
 
         if (
@@ -449,23 +623,134 @@ class ParcelShipmentService
         }
     }
 
-    protected function storeCnibPhoto(mixed $file, string $role): string
+    protected function storeParcelPhoto(mixed $file): string
     {
         if (! $file instanceof \Illuminate\Http\UploadedFile) {
             throw ValidationException::withMessages([
-                $role === 'sender' ? 'sender_cnib_photo' : 'recipient_cnib_photo' => 'La photo CNIB est obligatoire (image).',
+                'parcel_photo' => 'La photo du colis est obligatoire (image).',
             ]);
         }
 
-        $path = $file->store('parcels/cnib/'.$role, 'public');
+        $path = $file->store('parcels/photos', 'public');
 
         if (! is_string($path) || $path === '') {
             throw ValidationException::withMessages([
-                $role === 'sender' ? 'sender_cnib_photo' : 'recipient_cnib_photo' => 'Impossible d’enregistrer la photo CNIB.',
+                'parcel_photo' => 'Impossible d’enregistrer la photo du colis.',
             ]);
         }
 
         return $path;
+    }
+
+    protected function resolvePickupDistanceKm(
+        ?string $pickupAddress,
+        ?TravelCompanyRoute $route,
+        ParcelScopeEnum $scope,
+        ?string $originCity,
+    ): ?float {
+        $address = trim((string) $pickupAddress);
+        if ($address === '') {
+            return null;
+        }
+
+        $pickup = GoogleMapsExtractor::extractCoordinates($address);
+        if ($pickup === null) {
+            throw ValidationException::withMessages([
+                'pickup_address' => 'Impossible d’extraire les coordonnées du lien Google Maps de collecte.',
+            ]);
+        }
+
+        $origin = $this->pickupOriginCoordinates($route, $scope, (string) $originCity);
+
+        return $this->mapDirections->drivingDistanceKm($origin, $pickup);
+    }
+
+    /**
+     * @return array{latitude: float, longitude: float}
+     */
+    protected function pickupOriginCoordinates(
+        ?TravelCompanyRoute $route,
+        ParcelScopeEnum $scope,
+        string $originCity,
+    ): array {
+        if ($scope === ParcelScopeEnum::Intercity && $route !== null) {
+            $route->loadMissing('travelCompany');
+            $companyLink = trim((string) ($route->travelCompany?->google_maps_link ?? ''));
+            if ($companyLink !== '') {
+                $fromCompany = GoogleMapsExtractor::extractCoordinates($companyLink);
+                if ($fromCompany !== null) {
+                    return [
+                        'latitude' => $fromCompany['latitude'],
+                        'longitude' => $fromCompany['longitude'],
+                    ];
+                }
+            }
+
+            $station = TravelCompanyStation::query()
+                ->where('travel_company_id', $route->travel_company_id)
+                ->where('is_active', true)
+                ->whereNotNull('google_maps_link')
+                ->where('google_maps_link', '!=', '')
+                ->where(function ($query) use ($route): void {
+                    $departure = (string) $route->departure;
+                    $query->where('station_name', 'like', '%'.$departure.'%')
+                        ->orWhere('address', 'like', '%'.$departure.'%');
+                })
+                ->first();
+
+            if ($station) {
+                $fromStation = GoogleMapsExtractor::extractCoordinates((string) $station->google_maps_link);
+                if ($fromStation !== null) {
+                    return [
+                        'latitude' => $fromStation['latitude'],
+                        'longitude' => $fromStation['longitude'],
+                    ];
+                }
+            }
+
+            $geocoded = $this->mapDirections->geocode($route->departure.', Burkina Faso');
+            if ($geocoded !== null) {
+                return $geocoded;
+            }
+        }
+
+        $city = $originCity !== '' ? $originCity : (string) ($route?->departure ?? '');
+        $geocodedCity = $this->mapDirections->geocode($city.', Burkina Faso');
+        if ($geocodedCity !== null) {
+            return $geocodedCity;
+        }
+
+        return [
+            'latitude' => (float) config('services.mapbox.default_origin_lat'),
+            'longitude' => (float) config('services.mapbox.default_origin_lng'),
+        ];
+    }
+
+    protected function storeCnibPhoto(mixed $file, string $role, ?string $profilePath = null): string
+    {
+        if ($file instanceof UploadedFile) {
+            $path = $file->store('parcels/cnib/'.$role, 'public');
+
+            if (! is_string($path) || $path === '') {
+                throw ValidationException::withMessages([
+                    $role === 'sender' ? 'sender_cnib_photo' : 'recipient_cnib_photo' => 'Impossible d’enregistrer la photo CNIB.',
+                ]);
+            }
+
+            return $path;
+        }
+
+        if ($role === 'sender' && filled($profilePath) && Storage::disk('public')->exists($profilePath)) {
+            $extension = pathinfo($profilePath, PATHINFO_EXTENSION) ?: 'jpg';
+            $destination = 'parcels/cnib/sender/'.Str::uuid().'.'.$extension;
+            Storage::disk('public')->copy($profilePath, $destination);
+
+            return $destination;
+        }
+
+        throw ValidationException::withMessages([
+            $role === 'sender' ? 'sender_cnib_photo' : 'recipient_cnib_photo' => 'La photo CNIB est obligatoire (image).',
+        ]);
     }
 
     protected function routeReferenceAmount(TravelCompanyRoute $route): string

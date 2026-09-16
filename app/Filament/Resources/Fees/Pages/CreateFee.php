@@ -15,4 +15,9 @@ class CreateFee extends CreateRecord
     {
         return app(FeeService::class)->create($data);
     }
+
+    protected function getRedirectUrl(): string
+    {
+        return \App\Filament\Pages\Configuration::tabUrl('frais');
+    }
 }

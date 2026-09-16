@@ -6,11 +6,13 @@ use App\Data\TransactionTypeEnum;
 use App\Data\TrustedPaymentQuote;
 use App\Data\TrustedPaymentStatusEnum;
 use App\Data\TrustedPayoutStatusEnum;
+use App\Models\ParcelShipment;
 use App\Models\RelayJob;
 use App\Models\TrustedPayment;
 use App\Models\TrustedPaymentEvent;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Notifications\MerchantFundsHeldNotification;
 use App\Support\Phone;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -198,10 +200,46 @@ class TrustedPaymentService
     public function listForBuyer(int $userId): Collection
     {
         return TrustedPayment::query()
-            ->with(['merchant', 'transaction.paymentNetwork', 'paymentNetwork'])
+            ->with(['merchant', 'transaction.paymentNetwork', 'paymentNetwork', 'parcelShipment'])
             ->where('buyer_user_id', $userId)
             ->latest('id')
             ->get();
+    }
+
+    public function listLinkableForBuyer(int $userId): Collection
+    {
+        return TrustedPayment::query()
+            ->with(['merchant', 'paymentNetwork'])
+            ->where('buyer_user_id', $userId)
+            ->whereIn('status', [
+                TrustedPaymentStatusEnum::FundsHeld->value,
+                TrustedPaymentStatusEnum::ExpeditionRequested->value,
+            ])
+            ->whereDoesntHave('parcelShipment')
+            ->latest('id')
+            ->get();
+    }
+
+    public function findLinkableForBuyer(int $userId, string $uuid): TrustedPayment
+    {
+        $payment = TrustedPayment::query()
+            ->with(['merchant', 'paymentNetwork'])
+            ->where('uuid', $uuid)
+            ->where('buyer_user_id', $userId)
+            ->whereIn('status', [
+                TrustedPaymentStatusEnum::FundsHeld->value,
+                TrustedPaymentStatusEnum::ExpeditionRequested->value,
+            ])
+            ->whereDoesntHave('parcelShipment')
+            ->first();
+
+        if (! $payment) {
+            throw ValidationException::withMessages([
+                'trusted_payment_uuid' => 'Aucun paiement confiant disponible à lier (fonds bloqués, non déjà utilisé).',
+            ]);
+        }
+
+        return $payment;
     }
 
     public function listForMerchant(int $userId): Collection
@@ -253,6 +291,77 @@ class TrustedPaymentService
             TrustedPaymentStatusEnum::FundsHeld,
             'Fonds reçus et bloqués chez Facilya.',
             'system',
+        );
+
+        $payment->refresh();
+        $payment->loadMissing('merchant');
+        if ($payment->merchant) {
+            try {
+                $payment->merchant->notify(new MerchantFundsHeldNotification($payment));
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Notif commerçant paiement confiant impossible.', [
+                    'trusted_payment_id' => $payment->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    public function onLinkedToParcel(TrustedPayment $payment, ParcelShipment $shipment): TrustedPayment
+    {
+        $isDelivery = $shipment->isDoorDelivery();
+
+        if ($isDelivery) {
+            return $this->transition(
+                $payment,
+                TrustedPaymentStatusEnum::Collected,
+                'Livraison colis '.$shipment->reference.' : versement immédiat du paiement confiant.',
+                'system',
+            );
+        }
+
+        if ($payment->status === TrustedPaymentStatusEnum::FundsHeld) {
+            $payment->fill([
+                'pickup_address' => $shipment->pickup_address ?: $payment->pickup_address,
+                'pickup_district' => $shipment->pickup_district ?: $payment->pickup_district,
+                'delivery_address' => $shipment->recipient_address ?: $payment->delivery_address,
+                'delivery_district' => $shipment->recipient_district ?: $payment->delivery_district,
+            ])->save();
+
+            return $this->transition(
+                $payment,
+                TrustedPaymentStatusEnum::ExpeditionRequested,
+                'Lié à l’expédition colis '.$shipment->reference.'. Déblocage à la collecte avec le code.',
+                'buyer',
+                (int) $shipment->user_id,
+            );
+        }
+
+        return $payment;
+    }
+
+    public function releaseOnParcelCollected(TrustedPayment $payment, ParcelShipment $shipment): TrustedPayment
+    {
+        $status = $payment->status instanceof TrustedPaymentStatusEnum
+            ? $payment->status
+            : TrustedPaymentStatusEnum::from((string) $payment->status);
+
+        if (in_array($status, [
+            TrustedPaymentStatusEnum::Collected,
+            TrustedPaymentStatusEnum::InTransit,
+            TrustedPaymentStatusEnum::Arrived,
+            TrustedPaymentStatusEnum::Delivered,
+            TrustedPaymentStatusEnum::Cancelled,
+            TrustedPaymentStatusEnum::Failed,
+        ], true)) {
+            return $payment;
+        }
+
+        return $this->transition(
+            $payment,
+            TrustedPaymentStatusEnum::Collected,
+            'Collecte colis '.$shipment->reference.' : déblocage confirmé avec le code.',
+            'admin',
         );
     }
 

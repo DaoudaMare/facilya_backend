@@ -19,11 +19,17 @@ class ParcelShipmentInfolist
                     ->schema([
                         TextEntry::make('reference')->label('Référence'),
                         TextEntry::make('status')->label('Statut de suivi')->badge(),
+                        TextEntry::make('scope')->label('Type')->badge(),
                         TextEntry::make('delivery_mode')->label('Mode de livraison')->badge(),
                         TextEntry::make('travelCompany.name')->label('Compagnie'),
                         TextEntry::make('route.departure')->label('Départ'),
                         TextEntry::make('route.arrival')->label('Arrivée'),
                         TextEntry::make('parcel_description')->label('Description')->placeholder('—')->columnSpanFull(),
+                        TextEntry::make('estimated_weight_kg')->label('Poids estimé (kg)')->placeholder('—'),
+                        ImageEntry::make('parcel_photo')
+                            ->label('Photo du colis')
+                            ->disk('public')
+                            ->columnSpanFull(),
                     ]),
                 Section::make('Expéditeur')
                     ->columns(2)
@@ -32,7 +38,11 @@ class ParcelShipmentInfolist
                         TextEntry::make('sender_phone')->label('Téléphone'),
                         TextEntry::make('sender_cnib_number')->label('N° CNIB'),
                         TextEntry::make('pickup_code')->label('Code collecte')->copyable(),
-                        TextEntry::make('pickup_address')->label('Adresse pickup')->columnSpanFull(),
+                        TextEntry::make('trustedPayment.reference')
+                            ->label('Paiement confiant')
+                            ->placeholder('—')
+                            ->copyable(),
+                        TextEntry::make('pickup_address')->label('Lien Maps collecte')->url(fn ($state) => filled($state) ? (string) $state : null)->openUrlInNewTab()->columnSpanFull(),
                         TextEntry::make('pickup_district')->label('Quartier')->placeholder('—'),
                         ImageEntry::make('sender_cnib_photo')
                             ->label('Photo CNIB expéditeur')
@@ -47,7 +57,7 @@ class ParcelShipmentInfolist
                         TextEntry::make('recipient_cnib_number')->label('N° CNIB'),
                         TextEntry::make('delivery_code')->label('Code livraison')->placeholder('—')->copyable(),
                         TextEntry::make('station_pickup_code')->label('Code retrait gare')->placeholder('—')->copyable(),
-                        TextEntry::make('recipient_address')->label('Adresse drop-off')->placeholder('—')->columnSpanFull(),
+                        TextEntry::make('recipient_address')->label('Lien Maps livraison')->placeholder('—')->url(fn ($state) => filled($state) ? (string) $state : null)->openUrlInNewTab()->columnSpanFull(),
                         TextEntry::make('recipient_district')->label('Quartier')->placeholder('—'),
                         ImageEntry::make('recipient_cnib_photo')
                             ->label('Photo CNIB destinataire')

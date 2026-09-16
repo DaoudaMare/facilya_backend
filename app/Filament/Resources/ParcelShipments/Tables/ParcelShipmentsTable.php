@@ -26,6 +26,10 @@ class ParcelShipmentsTable
                     ->badge()
                     ->sortable()
                     ->description(fn (ParcelShipment $record): ?string => ParcelShipmentStatusActions::nextStepHint($record)),
+                TextColumn::make('scope')
+                    ->label('Type')
+                    ->badge()
+                    ->toggleable(),
                 TextColumn::make('delivery_mode')
                     ->label('Livraison')
                     ->badge(),
@@ -56,6 +60,9 @@ class ParcelShipmentsTable
             ])
             ->defaultSort('id', 'desc')
             ->filters([
+                SelectFilter::make('scope')
+                    ->label('Type')
+                    ->options(\App\Data\ParcelScopeEnum::class),
                 SelectFilter::make('status')
                     ->label('Statut')
                     ->options(ParcelStatusEnum::class),

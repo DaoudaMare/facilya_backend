@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Transactions\Support;
 
+use App\Filament\Resources\ParcelShipments\Support\ParcelShipmentStatusActions;
 use App\Data\ParcelDeliveryModeEnum;
 use App\Data\ParcelStatusEnum;
 use App\Data\PaymentStatusEnum;
@@ -9,13 +10,16 @@ use App\Data\TrustedPaymentStatusEnum;
 use App\Models\ParcelShipment;
 use App\Models\Transaction;
 use App\Models\TrustedPayment;
+use App\Models\User;
 use App\Services\ParcelShipmentService;
 use App\Services\TransactionService;
 use App\Services\TrustedPaymentService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class TransactionStatusActions
@@ -25,6 +29,10 @@ class TransactionStatusActions
      */
     public static function headerActionsFor(Transaction $transaction): array
     {
+        if (! self::userCanManage($transaction)) {
+            return [];
+        }
+
         if ($transaction->isParcelShipment()) {
             return self::parcelActions($transaction, forTable: false);
         }
@@ -40,32 +48,32 @@ class TransactionStatusActions
     {
         $actions = [
             self::makePaymentReceivedAction()
-                ->visible(fn (Transaction $record): bool => self::canMarkPaymentReceived($record)),
+                ->visible(fn (Transaction $record): bool => self::userCanManage($record) && self::canMarkPaymentReceived($record)),
             self::makeServiceDeliveredAction()
-                ->visible(fn (Transaction $record): bool => self::canMarkServiceDelivered($record)),
+                ->visible(fn (Transaction $record): bool => self::userCanManage($record) && self::canMarkServiceDelivered($record)),
             self::makeAcceptExpeditionAction()
-                ->visible(fn (Transaction $record): bool => self::canAcceptExpedition($record)),
+                ->visible(fn (Transaction $record): bool => self::userCanManage($record) && self::canAcceptExpedition($record)),
         ];
 
         foreach (self::parcelTransitionTargets() as $status) {
             $actions[] = self::makeParcelTransitionAction($status)
-                ->visible(fn (Transaction $record): bool => self::canTransitionParcelTo($record, $status));
+                ->visible(fn (Transaction $record): bool => self::userCanManage($record) && self::canTransitionParcelTo($record, $status));
         }
 
         foreach (self::trustedTransitionTargets() as $status) {
             $actions[] = self::makeTrustedTransitionAction($status)
-                ->visible(fn (Transaction $record): bool => self::canTransitionTrustedTo($record, $status));
+                ->visible(fn (Transaction $record): bool => self::userCanManage($record) && self::canTransitionTrustedTo($record, $status));
         }
 
         $actions[] = self::makeTrustedRetryPayoutAction()
-            ->visible(fn (Transaction $record): bool => self::canRetryTrustedPayout($record));
+            ->visible(fn (Transaction $record): bool => self::userCanManage($record) && self::canRetryTrustedPayout($record));
 
         return ActionGroup::make($actions)
             ->label('Statut')
             ->icon('heroicon-o-arrow-path')
             ->button()
             ->color('primary')
-            ->visible(fn (Transaction $record): bool => self::hasAnyAction($record));
+            ->visible(fn (Transaction $record): bool => self::userCanManage($record) && self::hasAnyAction($record));
     }
 
     public static function nextStepHint(Transaction $transaction): ?string
@@ -294,12 +302,23 @@ class TransactionStatusActions
                 $next,
                 self::parcelOf($record),
             ))
-            ->form([
-                Textarea::make('note')
+            ->form(function (Transaction $record) use ($next): array {
+                $fields = [];
+                $parcel = self::parcelOf($record);
+                if ($next === ParcelStatusEnum::Collected && $parcel && ParcelShipmentStatusActions::needsEscrowUnlock($parcel)) {
+                    $fields[] = TextInput::make('pickup_code')
+                        ->label('Code collecte')
+                        ->helperText('Code de déblocage du paiement confiant.')
+                        ->required()
+                        ->maxLength(12);
+                }
+                $fields[] = Textarea::make('note')
                     ->label('Note (optionnel)')
                     ->rows(2)
-                    ->maxLength(255),
-            ])
+                    ->maxLength(255);
+
+                return $fields;
+            })
             ->action(function (Transaction $record, array $data) use ($next): void {
                 $parcel = self::parcelOf($record);
                 if (! $parcel) {
@@ -315,6 +334,7 @@ class TransactionStatusActions
                         $data['note'] ?? null,
                         'admin',
                         auth()->id(),
+                        isset($data['pickup_code']) ? (string) $data['pickup_code'] : null,
                     );
                     Notification::make()
                         ->title('Statut colis mis à jour')
@@ -520,7 +540,7 @@ class TransactionStatusActions
         }
 
         return array_values(array_filter(
-            $current->allowedNext($mode),
+            $shipment->allowedNextStatuses(),
             fn (ParcelStatusEnum $status) => $status !== ParcelStatusEnum::Confirmed,
         ));
     }
@@ -551,6 +571,7 @@ class TransactionStatusActions
             ParcelStatusEnum::Collected,
             ParcelStatusEnum::Shipped,
             ParcelStatusEnum::ArrivedStation,
+            ParcelStatusEnum::OutForDelivery,
             ParcelStatusEnum::Delivered,
             ParcelStatusEnum::PickedUp,
             ParcelStatusEnum::Cancelled,
@@ -583,6 +604,7 @@ class TransactionStatusActions
             ParcelStatusEnum::Collected => 'Colis récupéré',
             ParcelStatusEnum::Shipped => 'Colis expédié',
             ParcelStatusEnum::ArrivedStation => 'Colis arrivé à destination',
+            ParcelStatusEnum::OutForDelivery => 'Colis en livraison',
             ParcelStatusEnum::Delivered => 'Colis livré au destinataire',
             ParcelStatusEnum::PickedUp => 'Colis remis au destinataire',
             ParcelStatusEnum::Cancelled => 'Annulé',
@@ -603,5 +625,23 @@ class TransactionStatusActions
         $transaction->loadMissing('trustedPayment');
 
         return $transaction->trustedPayment;
+    }
+
+    protected static function userCanManage(Transaction $transaction): bool
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return false;
+        }
+
+        if ($transaction->isParcelShipment()) {
+            return $user->hasPermission('parcels.manage');
+        }
+
+        if ($transaction->isTrustedPayment()) {
+            return $user->hasPermission('trusted_payments.manage');
+        }
+
+        return $user->hasPermission('transactions.manage');
     }
 }

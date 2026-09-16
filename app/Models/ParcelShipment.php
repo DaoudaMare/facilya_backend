@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Data\ParcelDeliveryModeEnum;
+use App\Data\ParcelScopeEnum;
 use App\Data\ParcelStatusEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -19,8 +20,12 @@ class ParcelShipment extends Model
         'reference',
         'user_id',
         'transaction_id',
+        'trusted_payment_id',
         'travel_company_id',
         'travel_company_route_id',
+        'scope',
+        'origin_city',
+        'destination_city',
         'delivery_mode',
         'status',
         'sender_name',
@@ -36,6 +41,7 @@ class ParcelShipment extends Model
         'recipient_address',
         'recipient_district',
         'parcel_description',
+        'parcel_photo',
         'estimated_weight_kg',
         'declared_value',
         'agency_fee',
@@ -72,6 +78,7 @@ class ParcelShipment extends Model
     {
         return [
             'delivery_mode' => ParcelDeliveryModeEnum::class,
+            'scope' => ParcelScopeEnum::class,
             'status' => ParcelStatusEnum::class,
             'estimated_weight_kg' => 'decimal:2',
             'declared_value' => 'decimal:2',
@@ -105,6 +112,11 @@ class ParcelShipment extends Model
         return $this->belongsTo(Transaction::class);
     }
 
+    public function trustedPayment(): BelongsTo
+    {
+        return $this->belongsTo(TrustedPayment::class);
+    }
+
     public function travelCompany(): BelongsTo
     {
         return $this->belongsTo(TravelCompany::class);
@@ -125,12 +137,46 @@ class ParcelShipment extends Model
         return $this->delivery_mode === ParcelDeliveryModeEnum::DoorDelivery;
     }
 
+    public function isLocal(): bool
+    {
+        return $this->scope === ParcelScopeEnum::Local;
+    }
+
+    /**
+     * @return list<ParcelStatusEnum>
+     */
+    public function allowedNextStatuses(): array
+    {
+        $status = $this->status instanceof ParcelStatusEnum
+            ? $this->status
+            : ParcelStatusEnum::tryFrom((string) $this->status);
+
+        $mode = $this->delivery_mode instanceof ParcelDeliveryModeEnum
+            ? $this->delivery_mode
+            : ParcelDeliveryModeEnum::tryFrom((string) $this->delivery_mode);
+
+        $scope = $this->scope instanceof ParcelScopeEnum
+            ? $this->scope
+            : ParcelScopeEnum::tryFrom((string) ($this->scope ?? ParcelScopeEnum::Intercity->value));
+
+        if (! $status || ! $mode) {
+            return [];
+        }
+
+        return $status->allowedNext($mode, $scope ?? ParcelScopeEnum::Intercity);
+    }
+
     public function corridorLabel(): string
     {
-        return sprintf(
-            '%s → %s',
-            $this->route?->departure ?? 'Départ',
-            $this->route?->arrival ?? 'Arrivée',
-        );
+        if ($this->isLocal()) {
+            $city = $this->origin_city ?: $this->destination_city ?: 'Ville';
+
+            return $city.' (local)';
+        }
+
+        $departure = $this->origin_city ?: ($this->route?->departure ?? 'Départ');
+        $arrival = $this->destination_city ?: ($this->route?->arrival ?? 'Arrivée');
+
+        return sprintf('%s → %s', $departure, $arrival);
     }
 }

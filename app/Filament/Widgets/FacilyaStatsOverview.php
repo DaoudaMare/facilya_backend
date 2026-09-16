@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Support\AuthorizesPermissions;
 use App\Models\User;
 use App\Services\TransactionService;
 use App\Services\TravelCompanyService;
@@ -10,9 +11,20 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class FacilyaStatsOverview extends StatsOverviewWidget
 {
+    use AuthorizesPermissions;
+
     protected static ?int $sort = 1;
 
     protected ?string $pollingInterval = '30s';
+
+    public static function canView(): bool
+    {
+        return static::userHasPermission(
+            'transactions.view',
+            'transactions.manage',
+            'travel.manage',
+        );
+    }
 
     protected function getStats(): array
     {

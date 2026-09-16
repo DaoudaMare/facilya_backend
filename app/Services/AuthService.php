@@ -4,13 +4,17 @@ namespace App\Services;
 
 use App\Channels\SmsChannel;
 use App\Channels\WhatsAppChannel;
+use App\Models\Role;
 use App\Models\User;
 use App\Notifications\OtpCodeNotification;
 use App\Repositories\Contracts\UserRepositoryInterface;
+use App\Support\GoogleMapsLink;
 use App\Support\Phone;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -44,7 +48,7 @@ class AuthService
     }
 
     /**
-     * @return array{token: string, user: User, needs_pin: bool}
+     * @return array{token: string, user: User, needs_pin: bool, is_new: bool}
      */
     public function verifyOtp(
         string $channel,
@@ -82,6 +86,13 @@ class AuthService
         Cache::forget($this->otpAttemptsKey($channel, $destination));
 
         [$user, $created] = $this->findOrCreateWithFlag($channel, $destination);
+
+        if (! $user->role_id) {
+            $user = $this->users->update($user, [
+                'role_id' => $this->defaultClientRoleId(),
+            ]);
+        }
+
         $user = $this->referrals->ensureReferralCode($user);
 
         if ($created) {
@@ -95,6 +106,7 @@ class AuthService
             'token' => $user->createToken('mobile')->plainTextToken,
             'user' => $user,
             'needs_pin' => ! $user->hasPin(),
+            'is_new' => $created,
         ];
     }
 
@@ -123,17 +135,165 @@ class AuthService
     }
 
     /**
-     * @param  array{name?: string}  $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function updateProfile(User $user, array $attributes): User
     {
         $payload = [];
 
-        if (array_key_exists('name', $attributes) && filled($attributes['name'])) {
-            $payload['name'] = trim((string) $attributes['name']);
+        $first = array_key_exists('first_name', $attributes)
+            ? trim((string) $attributes['first_name'])
+            : $user->first_name;
+        $last = array_key_exists('last_name', $attributes)
+            ? trim((string) $attributes['last_name'])
+            : $user->last_name;
+
+        if (array_key_exists('name', $attributes) && filled($attributes['name']) && ! array_key_exists('first_name', $attributes)) {
+            $parts = preg_split('/\s+/', trim((string) $attributes['name']), 2) ?: [];
+            $first = $parts[0] ?? $first;
+            $last = $parts[1] ?? $last;
         }
 
-        return $payload === [] ? $user : $this->users->update($user, $payload);
+        if (array_key_exists('first_name', $attributes) || array_key_exists('last_name', $attributes) || array_key_exists('name', $attributes)) {
+            $payload['first_name'] = filled($first) ? $first : null;
+            $payload['last_name'] = filled($last) ? $last : null;
+            $payload['name'] = trim(implode(' ', array_filter([$payload['first_name'], $payload['last_name']])));
+            if ($payload['name'] === '') {
+                $payload['name'] = 'Client Facilya';
+            }
+        }
+
+        if (array_key_exists('phone', $attributes)) {
+            $payload['phone'] = $this->uniquePhone($user, $attributes['phone'], 'phone');
+        }
+
+        if (array_key_exists('phone_secondary', $attributes)) {
+            $secondary = $this->uniquePhone($user, $attributes['phone_secondary'], 'phone_secondary');
+            $primary = $payload['phone'] ?? $user->phone;
+            if ($secondary !== null && $primary !== null && Phone::matches($secondary, (string) $primary)) {
+                throw ValidationException::withMessages([
+                    'phone_secondary' => 'Le second numéro doit être différent du premier.',
+                ]);
+            }
+            if ($secondary !== null && blank($primary)) {
+                throw ValidationException::withMessages([
+                    'phone_secondary' => 'Renseignez d’abord un numéro principal.',
+                ]);
+            }
+            $payload['phone_secondary'] = $secondary;
+        }
+
+        if (array_key_exists('cnib_number', $attributes)) {
+            $cnib = trim((string) $attributes['cnib_number']);
+            $payload['cnib_number'] = $cnib !== '' ? $cnib : null;
+        }
+
+        if (($attributes['cnib_photo'] ?? null) instanceof UploadedFile) {
+            $path = $attributes['cnib_photo']->store('users/cnib', 'public');
+            if (! is_string($path) || $path === '') {
+                throw ValidationException::withMessages([
+                    'cnib_photo' => 'Impossible d’enregistrer la photo CNIB.',
+                ]);
+            }
+            if (filled($user->cnib_photo) && $user->cnib_photo !== $path) {
+                Storage::disk('public')->delete($user->cnib_photo);
+            }
+            $payload['cnib_photo'] = $path;
+        }
+
+        $user = $payload === [] ? $user : $this->users->update($user, $payload);
+
+        if (array_key_exists('addresses', $attributes)) {
+            $this->syncAddresses($user, is_array($attributes['addresses']) ? $attributes['addresses'] : []);
+        }
+
+        return $user->fresh(['addresses']) ?? $user;
+    }
+
+    protected function uniquePhone(User $user, mixed $raw, string $field): ?string
+    {
+        $value = trim((string) $raw);
+        if ($value === '') {
+            return null;
+        }
+
+        $normalized = Phone::normalize($value);
+        if (! Phone::isValid($normalized)) {
+            throw ValidationException::withMessages([
+                $field => 'Indiquez un numéro burkinabè valide.',
+            ]);
+        }
+
+        $taken = User::query()
+            ->where('id', '!=', $user->id)
+            ->where(function ($query) use ($normalized) {
+                $query->where('phone', $normalized)
+                    ->orWhere('phone_secondary', $normalized);
+            })
+            ->exists();
+
+        if ($taken) {
+            throw ValidationException::withMessages([
+                $field => 'Ce numéro est déjà utilisé.',
+            ]);
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $addresses
+     */
+    protected function syncAddresses(User $user, array $addresses): void
+    {
+        $keepIds = [];
+
+        foreach ($addresses as $index => $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+            $maps = GoogleMapsLink::normalize((string) ($row['maps_url'] ?? ''));
+
+            if ($name === '' && $maps === '') {
+                continue;
+            }
+
+            if ($name === '') {
+                throw ValidationException::withMessages([
+                    "addresses.$index.name" => 'Indiquez le nom de l’adresse (ex. Domicile, Boutique).',
+                ]);
+            }
+
+            if ($maps === '') {
+                throw ValidationException::withMessages([
+                    "addresses.$index.maps_url" => 'Le lien Google Maps est obligatoire.',
+                ]);
+            }
+
+            if (! GoogleMapsLink::isValid($maps)) {
+                throw ValidationException::withMessages([
+                    "addresses.$index.maps_url" => GoogleMapsLink::validationMessage(),
+                ]);
+            }
+
+            $id = isset($row['id']) ? (int) $row['id'] : 0;
+            $address = $id > 0
+                ? $user->addresses()->whereKey($id)->first()
+                : null;
+
+            if (! $address) {
+                $address = $user->addresses()->make();
+            }
+
+            $address->fill([
+                'name' => $name,
+                'maps_url' => $maps,
+            ])->save();
+
+            $keepIds[] = $address->id;
+        }
+
+        $user->addresses()
+            ->when($keepIds !== [], fn ($query) => $query->whereNotIn('id', $keepIds), fn ($query) => $query)
+            ->delete();
     }
 
     public function logout(User $user): void
@@ -197,6 +357,7 @@ class AuthService
                 'email' => $destination,
                 'password' => Str::password(32),
                 'email_verified_at' => now(),
+                'role_id' => $this->defaultClientRoleId(),
             ]), true];
         }
 
@@ -212,7 +373,15 @@ class AuthService
             'phone' => $destination,
             'password' => Str::password(32),
             'email_verified_at' => now(),
+            'role_id' => $this->defaultClientRoleId(),
         ]), true];
+    }
+
+    protected function defaultClientRoleId(): ?int
+    {
+        $id = Role::query()->where('slug', 'client')->value('id');
+
+        return $id ? (int) $id : null;
     }
 
     protected function destinationFor(string $channel, ?string $rawPhone, ?string $rawEmail): string

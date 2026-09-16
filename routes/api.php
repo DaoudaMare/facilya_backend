@@ -29,6 +29,7 @@ Route::prefix('v1')->group(function () {
         ->middleware('throttle:20,1');
 
     Route::get('networks', [CatalogController::class, 'networks']);
+    Route::get('config', [CatalogController::class, 'config']);
     Route::get('promotions', [CatalogController::class, 'promotions']);
     Route::get('travel/cities', [CatalogController::class, 'cities']);
     Route::get('travel/corridors', [CatalogController::class, 'corridors']);
@@ -46,6 +47,7 @@ Route::prefix('v1')->group(function () {
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::get('me', [AuthController::class, 'me']);
         Route::patch('me', [AuthController::class, 'updateMe']);
+        Route::post('me', [AuthController::class, 'updateMe']);
         Route::get('me/stats', [TransactionController::class, 'stats']);
         Route::get('me/referral', [ReferralController::class, 'show']);
 

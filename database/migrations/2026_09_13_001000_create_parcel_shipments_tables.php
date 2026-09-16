@@ -18,8 +18,8 @@ return new class extends Migration
                 ->nullable()
                 ->constrained('transactions')
                 ->nullOnDelete();
-            $table->foreignId('travel_company_id')->constrained('travel_companies')->restrictOnDelete();
-            $table->foreignId('travel_company_route_id')->constrained('travel_company_routes')->restrictOnDelete();
+            $table->foreignId('travel_company_id')->nullable()->constrained('travel_companies')->nullOnDelete();
+            $table->foreignId('travel_company_route_id')->nullable()->constrained('travel_company_routes')->nullOnDelete();
 
             $table->string('delivery_mode');
             $table->string('status')->default('pending_payment');

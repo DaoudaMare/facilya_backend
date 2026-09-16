@@ -53,9 +53,13 @@ class TrustedPaymentController extends Controller
     {
         $role = $request->query('role', 'buyer');
 
-        $items = $role === 'merchant'
-            ? $this->trustedPayments->listForMerchant((int) $request->user()->id)
-            : $this->trustedPayments->listForBuyer((int) $request->user()->id);
+        if ($request->boolean('linkable')) {
+            $items = $this->trustedPayments->listLinkableForBuyer((int) $request->user()->id);
+        } elseif ($role === 'merchant') {
+            $items = $this->trustedPayments->listForMerchant((int) $request->user()->id);
+        } else {
+            $items = $this->trustedPayments->listForBuyer((int) $request->user()->id);
+        }
 
         return response()->json([
             'data' => TrustedPaymentResource::collection($items),
