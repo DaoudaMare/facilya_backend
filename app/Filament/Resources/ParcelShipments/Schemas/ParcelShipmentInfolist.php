@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ParcelShipments\Schemas;
 
+use App\Filament\Support\EscrowCodesSection;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -14,6 +15,7 @@ class ParcelShipmentInfolist
     {
         return $schema
             ->components([
+                EscrowCodesSection::make(),
                 Section::make('Envoi')
                     ->columns(3)
                     ->schema([

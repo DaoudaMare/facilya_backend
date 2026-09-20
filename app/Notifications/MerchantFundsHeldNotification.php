@@ -5,6 +5,7 @@ namespace App\Notifications;
 use App\Channels\SmsChannel;
 use App\Channels\WhatsAppChannel;
 use App\Models\TrustedPayment;
+use App\Support\Phone;
 use Illuminate\Notifications\Notification;
 
 class MerchantFundsHeldNotification extends Notification
@@ -23,13 +24,21 @@ class MerchantFundsHeldNotification extends Notification
 
     public function toSms(object $notifiable): string
     {
+        $this->payment->loadMissing('buyer');
         $amount = number_format((float) $this->payment->merchandise_amount, 0, ',', ' ');
+        $client = trim((string) ($this->payment->buyer?->name ?? 'Client Facilya'));
+        $phone = Phone::format((string) ($this->payment->buyer?->phone ?: $this->payment->buyer_deposit_phone));
+        $description = trim((string) $this->payment->product_description);
 
-        return sprintf(
-            'Facilya : un paiement confiant a été bloqué. Identifiant %s · %s F CFA. Conservez cet identifiant. Le code de validation n’est pas transmis.',
-            $this->payment->reference,
-            $amount,
-        );
+        return implode("\n", [
+            'Facilya : fonds bloqués sur un paiement confiant.',
+            'Identifiant : '.$this->payment->public_id,
+            'Montant : '.$amount.' F CFA',
+            'Client : '.$client,
+            'Tél. client : '.$phone,
+            'Produit / service : '.$description,
+            'Conservez l’identifiant. Le code de validation n’est pas transmis.',
+        ]);
     }
 
     public function toWhatsApp(object $notifiable): string

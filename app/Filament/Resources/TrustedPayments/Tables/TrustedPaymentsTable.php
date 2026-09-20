@@ -17,6 +17,10 @@ class TrustedPaymentsTable
     {
         return $table
             ->columns([
+                TextColumn::make('public_id')
+                    ->label('Identifiant')
+                    ->searchable()
+                    ->copyable(),
                 TextColumn::make('reference')
                     ->label('Référence')
                     ->searchable()

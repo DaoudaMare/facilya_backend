@@ -73,6 +73,9 @@ class TrustedPaymentApiTest extends TestCase
             ->assertJsonPath('data.product_description', 'iPhone reconditionné')
             ->assertJsonPath('data.pricing.payout_amount', 10000);
 
+        $this->assertMatchesRegularExpression('/^\d{6}$/', (string) $created->json('data.public_id'));
+        $this->assertMatchesRegularExpression('/^\d{6}$/', (string) $created->json('data.validation_code'));
+
         $uuid = $created->json('data.uuid');
         $payment = TrustedPayment::query()->where('uuid', $uuid)->firstOrFail();
         $this->assertSame(TrustedPaymentStatusEnum::PendingPayment, $payment->status);
@@ -87,8 +90,11 @@ class TrustedPaymentApiTest extends TestCase
             \App\Notifications\MerchantFundsHeldNotification::class,
             function (\App\Notifications\MerchantFundsHeldNotification $notification) use ($payment): bool {
                 $sms = $notification->toSms($notification->payment->merchant);
-                $this->assertStringContainsString($payment->reference, $sms);
-                $this->assertStringContainsString('Identifiant', $sms);
+                $this->assertStringContainsString((string) $payment->public_id, $sms);
+                $this->assertStringContainsString('Acheteur Test', $sms);
+                $this->assertStringContainsString('iPhone reconditionné', $sms);
+                $this->assertStringContainsString(\App\Support\Phone::format('0711111155'), $sms);
+                $this->assertStringNotContainsString((string) $payment->validation_code, $sms);
 
                 return true;
             },
@@ -139,11 +145,19 @@ class TrustedPaymentApiTest extends TestCase
         $this->getJson('/api/v1/trusted-payments/'.$uuid)
             ->assertOk()
             ->assertJsonPath('data.status', 'delivered')
-            ->assertJsonPath('data.payout_status', 'sent');
+            ->assertJsonPath('data.payout_status', 'sent')
+            ->assertJsonPath('data.validation_code', $payment->validation_code);
 
         Sanctum::actingAs($merchant);
+        $this->getJson('/api/v1/trusted-payments/'.$uuid)
+            ->assertOk()
+            ->assertJsonPath('data.public_id', $payment->public_id)
+            ->assertJsonMissingPath('data.validation_code');
+
         $this->getJson('/api/v1/trusted-payments?role=merchant')
             ->assertOk()
-            ->assertJsonCount(1, 'data');
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.public_id', $payment->public_id)
+            ->assertJsonPath('data.0.buyer.name', 'Acheteur Test');
     }
 }

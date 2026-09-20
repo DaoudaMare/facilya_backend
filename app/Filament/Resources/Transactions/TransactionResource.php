@@ -90,8 +90,15 @@ class TransactionResource extends Resource
                 'destinationNetwork',
                 'route.travelCompany',
                 'trip.station',
-                'parcelShipment',
-                'trustedPayment',
+                'parcelShipment.travelCompany',
+                'parcelShipment.route.travelCompany',
+                'parcelShipment.trustedPayment',
+                'parcelShipment.events',
+                'trustedPayment.buyer',
+                'trustedPayment.merchant',
+                'trustedPayment.parcelShipment',
+                'trustedPayment.events',
+                'relayJobs',
             ]);
     }
 

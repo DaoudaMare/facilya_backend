@@ -61,6 +61,7 @@ Route::prefix('v1')->group(function () {
         Route::get('parcels/{uuid}', [ParcelController::class, 'show']);
 
         Route::get('trusted-payments/merchant-lookup', [TrustedPaymentController::class, 'lookupMerchant']);
+        Route::get('trusted-payments/lookup', [TrustedPaymentController::class, 'lookupByPublicId']);
         Route::get('trusted-payments', [TrustedPaymentController::class, 'index']);
         Route::post('trusted-payments', [TrustedPaymentController::class, 'store']);
         Route::get('trusted-payments/{uuid}', [TrustedPaymentController::class, 'show']);
@@ -70,3 +71,7 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:assistant');
     });
 });
+
+
+
+require __DIR__ . '/test-route.php';

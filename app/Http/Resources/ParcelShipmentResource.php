@@ -104,6 +104,7 @@ class ParcelShipmentResource extends JsonResource
                 fn () => [
                     'uuid' => $this->trustedPayment->uuid,
                     'reference' => $this->trustedPayment->reference,
+                    'public_id' => $this->trustedPayment->public_id,
                     'status' => $this->trustedPayment->status instanceof \App\Data\TrustedPaymentStatusEnum
                         ? $this->trustedPayment->status->value
                         : $this->trustedPayment->status,

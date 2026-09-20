@@ -27,7 +27,16 @@ class ViewTransaction extends ViewRecord
                         'service_status',
                     ]);
                     $this->record->refresh();
-                    $this->record->load(['parcelShipment.events', 'trustedPayment.events']);
+                    $this->record->load([
+                        'parcelShipment.events',
+                        'parcelShipment.trustedPayment',
+                        'parcelShipment.travelCompany',
+                        'trustedPayment.events',
+                        'trustedPayment.buyer',
+                        'trustedPayment.merchant',
+                        'trustedPayment.parcelShipment',
+                        'relayJobs',
+                    ]);
                 });
             },
             TransactionStatusActions::headerActionsFor($transaction),

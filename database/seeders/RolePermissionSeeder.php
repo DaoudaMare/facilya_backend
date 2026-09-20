@@ -56,6 +56,7 @@ class RolePermissionSeeder extends Seeder
             ['name' => 'Gérer les colis', 'slug' => 'parcels.manage', 'group' => 'transport', 'description' => null],
             ['name' => 'Voir les paiements confiants', 'slug' => 'trusted_payments.view', 'group' => 'finance', 'description' => null],
             ['name' => 'Gérer les paiements confiants', 'slug' => 'trusted_payments.manage', 'group' => 'finance', 'description' => null],
+            ['name' => 'Voir les codes de déblocage escrow', 'slug' => 'trusted_payments.view_unlock_codes', 'group' => 'finance', 'description' => 'Afficher le code à 6 chiffres qui débloque les fonds, après confirmation du mot de passe.'],
             ['name' => 'Gérer les frais', 'slug' => 'fees.manage', 'group' => 'finance', 'description' => null],
             ['name' => 'Gérer les réseaux', 'slug' => 'networks.manage', 'group' => 'finance', 'description' => null],
             ['name' => 'Gérer le transport', 'slug' => 'travel.manage', 'group' => 'transport', 'description' => null],

@@ -18,6 +18,8 @@ class TrustedPayment extends Model
     protected $fillable = [
         'uuid',
         'reference',
+        'public_id',
+        'validation_code',
         'buyer_user_id',
         'merchant_user_id',
         'transaction_id',

@@ -235,11 +235,31 @@ class ParcelShipmentService
             $attributes['recipient_address'] = $recipientAddress;
         }
 
+        $trustedPublicId = preg_replace('/\D+/', '', (string) ($attributes['trusted_payment_public_id'] ?? '')) ?? '';
+        $trustedUuid = trim((string) ($attributes['trusted_payment_uuid'] ?? ''));
+        $trustedPayment = null;
+        if ($trustedPublicId !== '') {
+            $trustedPayment = app(TrustedPaymentService::class)->findLinkableForMerchantByPublicId(
+                (int) $user->id,
+                $trustedPublicId,
+            );
+            $paymentNetworkId = (int) $trustedPayment->payment_network_id;
+            $trustedPayment->loadMissing('buyer');
+        } elseif ($trustedUuid !== '') {
+            $trustedPayment = app(TrustedPaymentService::class)->findLinkableForBuyer((int) $user->id, $trustedUuid);
+            $paymentNetworkId = (int) $trustedPayment->payment_network_id;
+        } else {
+            $paymentNetworkId = (int) ($attributes['payment_network_id'] ?? 0);
+        }
+
         $senderCnib = trim((string) ($attributes['sender_cnib_number'] ?? ''));
         if ($senderCnib === '') {
             $senderCnib = trim((string) ($user->cnib_number ?? ''));
         }
         $recipientCnib = trim((string) ($attributes['recipient_cnib_number'] ?? ''));
+        if ($recipientCnib === '' && $trustedPayment?->buyer) {
+            $recipientCnib = trim((string) ($trustedPayment->buyer->cnib_number ?? ''));
+        }
         $cnibErrors = [];
         if ($senderCnib === '') {
             $cnibErrors['sender_cnib_number'] = ['Le numéro CNIB de l’expéditeur est obligatoire.'];
@@ -256,7 +276,11 @@ class ParcelShipmentService
             'sender',
             $user->cnib_photo,
         );
-        $recipientPhoto = $this->storeCnibPhoto($attributes['recipient_cnib_photo'] ?? null, 'recipient');
+        $recipientPhoto = $this->storeCnibPhoto(
+            $attributes['recipient_cnib_photo'] ?? null,
+            'recipient',
+            $trustedPayment?->buyer?->cnib_photo,
+        );
         $parcelPhoto = $this->storeParcelPhoto($attributes['parcel_photo'] ?? null);
 
         $deliveryKm = isset($attributes['delivery_distance_km']) ? (float) $attributes['delivery_distance_km'] : null;
@@ -280,15 +304,6 @@ class ParcelShipmentService
             throw ValidationException::withMessages([
                 'estimated_weight_kg' => 'Le poids du colis est obligatoire.',
             ]);
-        }
-
-        $trustedUuid = trim((string) ($attributes['trusted_payment_uuid'] ?? ''));
-        $trustedPayment = null;
-        if ($trustedUuid !== '') {
-            $trustedPayment = app(TrustedPaymentService::class)->findLinkableForBuyer((int) $user->id, $trustedUuid);
-            $paymentNetworkId = (int) $trustedPayment->payment_network_id;
-        } else {
-            $paymentNetworkId = (int) ($attributes['payment_network_id'] ?? 0);
         }
 
         $this->transactions->assertReceivesPayments($paymentNetworkId, 'payment_network_id');
@@ -560,11 +575,11 @@ class ParcelShipmentService
             return;
         }
 
-        $expected = (string) $shipment->pickup_code;
+        $expected = (string) $escrow->validation_code;
         $given = trim((string) $pickupCode);
         if ($expected === '' || $given === '' || ! hash_equals($expected, $given)) {
             throw ValidationException::withMessages([
-                'pickup_code' => 'Le code de collecte est obligatoire pour débloquer le paiement confiant.',
+                'validation_code' => 'Le code de validation à 6 chiffres est obligatoire pour débloquer le paiement confiant.',
             ]);
         }
     }
@@ -740,9 +755,9 @@ class ParcelShipmentService
             return $path;
         }
 
-        if ($role === 'sender' && filled($profilePath) && Storage::disk('public')->exists($profilePath)) {
+        if (filled($profilePath) && Storage::disk('public')->exists($profilePath)) {
             $extension = pathinfo($profilePath, PATHINFO_EXTENSION) ?: 'jpg';
-            $destination = 'parcels/cnib/sender/'.Str::uuid().'.'.$extension;
+            $destination = 'parcels/cnib/'.$role.'/'.Str::uuid().'.'.$extension;
             Storage::disk('public')->copy($profilePath, $destination);
 
             return $destination;

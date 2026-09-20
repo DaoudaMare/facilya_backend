@@ -21,6 +21,10 @@ class AppServiceProvider extends ServiceProvider
             'filament.livewire.configuration-fees-table',
             \App\Filament\Livewire\ConfigurationFeesTable::class,
         );
+        Livewire::component(
+            'filament.livewire.reveal-escrow-unlock-code',
+            \App\Filament\Livewire\RevealEscrowUnlockCode::class,
+        );
 
         RateLimiter::for('otp', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip().'|'.$request->input('phone', ''));

@@ -49,6 +49,22 @@ class TrustedPaymentController extends Controller
         ]);
     }
 
+    public function lookupByPublicId(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'public_id' => ['required', 'string', 'regex:/^\d{6}$/'],
+        ]);
+
+        $payment = $this->trustedPayments->lookupForMerchantParcel(
+            (int) $request->user()->id,
+            (string) $data['public_id'],
+        );
+
+        return response()->json([
+            'data' => TrustedPaymentResource::make($payment),
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $role = $request->query('role', 'buyer');

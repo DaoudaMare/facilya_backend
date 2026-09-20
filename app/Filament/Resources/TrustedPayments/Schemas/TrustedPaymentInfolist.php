@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\TrustedPayments\Schemas;
 
+use App\Filament\Support\EscrowCodesSection;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
@@ -13,10 +14,12 @@ class TrustedPaymentInfolist
     {
         return $schema
             ->components([
+                EscrowCodesSection::make(),
                 Section::make('Paiement confiant')
                     ->columns(3)
                     ->schema([
                         TextEntry::make('reference')->label('Référence'),
+                        TextEntry::make('public_id')->label('Identifiant (6 chiffres)')->copyable(),
                         TextEntry::make('parcelShipment.reference')
                             ->label('Colis lié')
                             ->placeholder('—'),

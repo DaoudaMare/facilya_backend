@@ -31,6 +31,11 @@ class TrustedPaymentResource extends JsonResource
             'id' => $this->id,
             'uuid' => $this->uuid,
             'reference' => $this->reference,
+            'public_id' => $this->public_id,
+            'validation_code' => $this->when(
+                $request->user() && (int) $request->user()->id === (int) $this->buyer_user_id,
+                $this->validation_code,
+            ),
             'status' => $status?->value,
             'status_label' => $status?->label(),
             'tracking_label' => $status?->trackingLabel(),
@@ -43,6 +48,16 @@ class TrustedPaymentResource extends JsonResource
                 'id' => $this->buyer?->id,
                 'name' => $this->buyer?->name,
                 'phone' => Phone::format((string) ($this->buyer?->phone ?? '')),
+                'cnib_number' => $this->buyer?->cnib_number,
+                'cnib_photo_url' => $this->buyer?->cnibPhotoUrl(),
+                'addresses' => $this->when(
+                    $this->relationLoaded('buyer') && $this->buyer?->relationLoaded('addresses'),
+                    fn () => $this->buyer->addresses->map(fn ($address) => [
+                        'id' => $address->id,
+                        'name' => $address->name,
+                        'maps_url' => $address->maps_url,
+                    ])->values(),
+                ),
             ],
             'merchant' => [
                 'id' => $this->merchant?->id,

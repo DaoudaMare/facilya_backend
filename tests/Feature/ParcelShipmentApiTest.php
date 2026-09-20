@@ -352,7 +352,15 @@ class ParcelShipmentApiTest extends TestCase
 
     public function test_link_escrow_to_expedition_unlocks_on_pickup_code(): void
     {
-        $buyer = User::factory()->create(['phone' => '0711111188', 'pin' => '1234']);
+        $buyer = User::factory()->create([
+            'phone' => '0711111188',
+            'pin' => '1234',
+            'name' => 'Client Escrow',
+            'cnib_number' => 'B11112222',
+        ]);
+        Storage::disk('public')->put('users/cnib/buyer.jpg', 'fake');
+        $buyer->update(['cnib_photo' => 'users/cnib/buyer.jpg']);
+
         $merchant = User::factory()->create(['phone' => '0722222288', 'pin' => '1234', 'name' => 'Boutique']);
         $route = TravelCompanyRoute::query()->where('is_active', true)->firstOrFail();
         $route->update(['accepts_parcels' => true]);
@@ -372,26 +380,34 @@ class ParcelShipmentApiTest extends TestCase
         app(TransactionService::class)->markPaymentReceived($escrow->transaction);
         $escrow->refresh();
 
-        $this->getJson('/api/v1/trusted-payments?linkable=1')
+        Sanctum::actingAs($merchant);
+        $this->getJson('/api/v1/trusted-payments/lookup?public_id='.$escrow->public_id)
             ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.uuid', $escrow->uuid);
+            ->assertJsonPath('data.public_id', $escrow->public_id)
+            ->assertJsonPath('data.buyer.name', 'Client Escrow')
+            ->assertJsonMissingPath('data.validation_code');
 
         $created = $this->post('/api/v1/parcels', [
             'pin' => '1234',
             'travel_company_route_id' => $route->id,
             'delivery_mode' => 'station_pickup',
-            'trusted_payment_uuid' => $escrow->uuid,
-            'sender_phone' => '0711111188',
+            'trusted_payment_public_id' => $escrow->public_id,
+            'sender_phone' => '0722222288',
             'pickup_address' => $this->pickupMapsUrl(),
-            'recipient_phone' => '0722222299',
+            'recipient_name' => 'Client Escrow',
+            'recipient_phone' => '0711111188',
+            'recipient_cnib_number' => 'B11112222',
             'parcel_description' => 'Colis lié escrow',
             'declared_value' => 15000,
-            ...$this->identityPayload(),
+            'sender_name' => 'Boutique',
+            'sender_cnib_number' => 'B12345678',
+            'sender_cnib_photo' => UploadedFile::fake()->image('sender-cnib.jpg'),
+            'estimated_weight_kg' => 2,
+            'parcel_photo' => UploadedFile::fake()->image('parcel.jpg'),
         ])
             ->assertCreated()
             ->assertJsonPath('data.status', 'confirmed')
-            ->assertJsonPath('data.trusted_payment.reference', $escrow->reference);
+            ->assertJsonPath('data.trusted_payment.public_id', $escrow->public_id);
 
         $shipment = ParcelShipment::query()->where('uuid', $created->json('data.uuid'))->firstOrFail();
         $this->assertTrue($shipment->transaction->fresh()->isPaid());
@@ -404,9 +420,9 @@ class ParcelShipmentApiTest extends TestCase
 
         try {
             $parcels->transition($shipment->fresh(), ParcelStatusEnum::Collected, 'Sans code');
-            $this->fail('Expected pickup_code validation');
+            $this->fail('Expected validation_code validation');
         } catch (\Illuminate\Validation\ValidationException $e) {
-            $this->assertArrayHasKey('pickup_code', $e->errors());
+            $this->assertArrayHasKey('validation_code', $e->errors());
         }
 
         $parcels->transition(
@@ -415,22 +431,26 @@ class ParcelShipmentApiTest extends TestCase
             'Collecté',
             'admin',
             null,
-            $shipment->pickup_code,
+            $escrow->validation_code,
         );
 
         $escrow->refresh();
         $this->assertSame(\App\Data\TrustedPaymentStatusEnum::Collected, $escrow->status);
         $this->assertSame(\App\Data\TrustedPayoutStatusEnum::Processing, $escrow->payout_status);
-
-        $this->getJson('/api/v1/trusted-payments?linkable=1')
-            ->assertOk()
-            ->assertJsonCount(0, 'data');
     }
 
     public function test_link_escrow_to_delivery_pays_merchant_immediately(): void
     {
-        $buyer = User::factory()->create(['phone' => '0711111190', 'pin' => '1234']);
-        User::factory()->create(['phone' => '0722222290', 'pin' => '1234', 'name' => 'Marchand']);
+        $buyer = User::factory()->create([
+            'phone' => '0711111190',
+            'pin' => '1234',
+            'name' => 'Client Livraison',
+            'cnib_number' => 'B33334444',
+        ]);
+        Storage::disk('public')->put('users/cnib/buyer2.jpg', 'fake');
+        $buyer->update(['cnib_photo' => 'users/cnib/buyer2.jpg']);
+
+        $merchant = User::factory()->create(['phone' => '0722222290', 'pin' => '1234', 'name' => 'Marchand']);
         $route = TravelCompanyRoute::query()->where('is_active', true)->firstOrFail();
         $route->update(['accepts_parcels' => true]);
         $network = TransferNetwork::query()->where('code', 'ORANGE')->firstOrFail();
@@ -448,19 +468,26 @@ class ParcelShipmentApiTest extends TestCase
         $escrow = \App\Models\TrustedPayment::query()->where('uuid', $createdEscrow->json('data.uuid'))->firstOrFail();
         app(TransactionService::class)->markPaymentReceived($escrow->transaction);
 
+        Sanctum::actingAs($merchant);
         $this->post('/api/v1/parcels', [
             'pin' => '1234',
             'travel_company_route_id' => $route->id,
             'delivery_mode' => 'door_delivery',
-            'trusted_payment_uuid' => $escrow->uuid,
-            'sender_phone' => '0711111190',
+            'trusted_payment_public_id' => $escrow->public_id,
+            'sender_phone' => '0722222290',
             'pickup_address' => $this->pickupMapsUrl(),
-            'recipient_phone' => '0733333390',
+            'recipient_name' => 'Client Livraison',
+            'recipient_phone' => '0711111190',
+            'recipient_cnib_number' => 'B33334444',
             'recipient_address' => 'https://www.google.com/maps/place/Bobo',
             'delivery_distance_km' => 4,
             'parcel_description' => 'Livraison escrow',
             'declared_value' => 8000,
-            ...$this->identityPayload(),
+            'sender_name' => 'Marchand',
+            'sender_cnib_number' => 'B12345678',
+            'sender_cnib_photo' => UploadedFile::fake()->image('sender-cnib.jpg'),
+            'estimated_weight_kg' => 2,
+            'parcel_photo' => UploadedFile::fake()->image('parcel.jpg'),
         ])
             ->assertCreated()
             ->assertJsonPath('data.status', 'confirmed');

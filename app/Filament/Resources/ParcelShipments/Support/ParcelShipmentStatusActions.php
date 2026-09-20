@@ -148,10 +148,10 @@ class ParcelShipmentStatusActions
                 $fields = [];
                 if ($next === ParcelStatusEnum::Collected && self::needsEscrowUnlock($record)) {
                     $fields[] = TextInput::make('pickup_code')
-                        ->label('Code collecte')
-                        ->helperText('Code de déblocage du paiement confiant (pas l’identifiant).')
+                        ->label('Code de validation')
+                        ->helperText('Code à 6 chiffres du paiement confiant (pas l’identifiant).')
                         ->required()
-                        ->maxLength(12);
+                        ->maxLength(6);
                 }
                 $fields[] = Textarea::make('note')
                     ->label('Note (optionnel)')

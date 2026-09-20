@@ -35,6 +35,7 @@ class RolePermissionAccessTest extends TestCase
         $this->assertTrue($admin->canAccessPanel(Filament::getCurrentPanel()));
         $this->assertTrue($admin->hasPermission('users.manage'));
         $this->assertTrue($admin->hasPermission('roles.manage'));
+        $this->assertTrue($admin->hasPermission('trusted_payments.view_unlock_codes'));
     }
 
     public function test_ops_can_access_panel_but_not_manage_roles(): void
@@ -54,6 +55,7 @@ class RolePermissionAccessTest extends TestCase
         $this->assertFalse($ops->hasPermission('fees.manage'));
         $this->assertFalse($ops->hasPermission('networks.manage'));
         $this->assertFalse($ops->hasPermission('settings.manage'));
+        $this->assertFalse($ops->hasPermission('trusted_payments.view_unlock_codes'));
     }
 
     public function test_resource_gates_respect_ops_permissions(): void

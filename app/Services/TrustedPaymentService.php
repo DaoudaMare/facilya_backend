@@ -135,6 +135,8 @@ class TrustedPaymentService
             $declaredValue,
         ) {
             $reference = $this->generateReference();
+            $publicId = $this->generateUniqueDigitCode('public_id');
+            $validationCode = $this->generateUniqueDigitCode('validation_code');
 
             $transaction = $this->transactions->createTrustedPayment([
                 'user_id' => $buyer->id,
@@ -156,6 +158,8 @@ class TrustedPaymentService
 
             $payment = TrustedPayment::query()->create([
                 'reference' => $reference,
+                'public_id' => $publicId,
+                'validation_code' => $validationCode,
                 'buyer_user_id' => $buyer->id,
                 'merchant_user_id' => $merchant->id,
                 'transaction_id' => $transaction->id,
@@ -223,7 +227,7 @@ class TrustedPaymentService
     public function findLinkableForBuyer(int $userId, string $uuid): TrustedPayment
     {
         $payment = TrustedPayment::query()
-            ->with(['merchant', 'paymentNetwork'])
+            ->with(['merchant', 'paymentNetwork', 'buyer.addresses'])
             ->where('uuid', $uuid)
             ->where('buyer_user_id', $userId)
             ->whereIn('status', [
@@ -242,10 +246,39 @@ class TrustedPaymentService
         return $payment;
     }
 
+    public function findLinkableForMerchantByPublicId(int $merchantUserId, string $publicId): TrustedPayment
+    {
+        $publicId = $this->normalizePublicId($publicId);
+
+        $payment = TrustedPayment::query()
+            ->with(['buyer.addresses', 'merchant', 'paymentNetwork'])
+            ->where('public_id', $publicId)
+            ->where('merchant_user_id', $merchantUserId)
+            ->whereIn('status', [
+                TrustedPaymentStatusEnum::FundsHeld->value,
+                TrustedPaymentStatusEnum::ExpeditionRequested->value,
+            ])
+            ->whereDoesntHave('parcelShipment')
+            ->first();
+
+        if (! $payment) {
+            throw ValidationException::withMessages([
+                'trusted_payment_public_id' => 'Identifiant invalide, fonds non bloqués, ou paiement déjà lié à un colis.',
+            ]);
+        }
+
+        return $payment;
+    }
+
+    public function lookupForMerchantParcel(int $merchantUserId, string $publicId): TrustedPayment
+    {
+        return $this->findLinkableForMerchantByPublicId($merchantUserId, $publicId);
+    }
+
     public function listForMerchant(int $userId): Collection
     {
         return TrustedPayment::query()
-            ->with(['buyer', 'transaction.paymentNetwork', 'paymentNetwork'])
+            ->with(['buyer', 'transaction.paymentNetwork', 'paymentNetwork', 'parcelShipment'])
             ->where('merchant_user_id', $userId)
             ->whereIn('status', [
                 TrustedPaymentStatusEnum::FundsHeld->value,
@@ -591,5 +624,27 @@ class TrustedPaymentService
             now()->format('ymd'),
             strtoupper(Str::random(6)),
         );
+    }
+
+    protected function generateUniqueDigitCode(string $column): string
+    {
+        do {
+            $code = (string) random_int(100000, 999999);
+        } while (TrustedPayment::query()->where($column, $code)->exists());
+
+        return $code;
+    }
+
+    protected function normalizePublicId(string $publicId): string
+    {
+        $digits = preg_replace('/\D+/', '', $publicId) ?? '';
+
+        if (strlen($digits) !== 6) {
+            throw ValidationException::withMessages([
+                'trusted_payment_public_id' => 'L’identifiant doit contenir 6 chiffres.',
+            ]);
+        }
+
+        return $digits;
     }
 }
